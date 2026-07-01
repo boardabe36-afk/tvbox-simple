@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/tv_background"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="48dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/title_sources"
+            android:textColor="@color/tv_text_primary"
+            android:textSize="28sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="JSON 源：粘贴 base64-JSON 源 URL（兼容 TVBox 生态）"
+            android:textColor="@color/tv_text_secondary"
+            android:textSize="14sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="HTML 源：直接粘贴影视网站根 URL（如 https://www.icaiqi.com，仅支持传统 PHP 模板站）"
+            android:textColor="@color/tv_text_secondary"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/settings_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/settings_empty"
+            android:textColor="@color/tv_text_secondary"
+            android:textSize="14sp" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/settings_list"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:nestedScrollingEnabled="false" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="24dp"
+            android:background="@color/tv_card_background" />
+
+        <EditText
+            android:id="@+id/settings_name_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:background="@color/tv_card_background"
+            android:hint="@string/settings_source_name_hint"
+            android:imeOptions="actionNext"
+            android:inputType="text"
+            android:padding="20dp"
+            android:textColor="@color/tv_text_primary"
+            android:textColorHint="@color/tv_text_secondary"
+            android:textSize="18sp" />
+
+        <EditText
+            android:id="@+id/settings_url_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="@color/tv_card_background"
+            android:hint="@string/settings_source_url_hint"
+            android:imeOptions="actionDone"
+            android:inputType="textUri"
+            android:padding="20dp"
+            android:textColor="@color/tv_text_primary"
+            android:textColorHint="@color/tv_text_secondary"
+            android:textSize="18sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/settings_test_btn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@color/tv_card_background"
+                android:text="@string/settings_test"
+                android:textColor="@color/tv_text_primary"
+                android:textSize="16sp" />
+
+            <Button
+                android:id="@+id/settings_add_json_btn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1.2"
+                android:background="@color/tv_primary"
+                android:text="添加 JSON 源"
+                android:textColor="@color/tv_on_primary"
+                android:textSize="16sp" />
+
+            <Button
+                android:id="@+id/settings_add_html_btn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1.2"
+                android:background="@color/tv_accent"
+                android:text="添加 HTML 源"
+                android:textColor="@color/tv_on_primary"
+                android:textSize="16sp" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

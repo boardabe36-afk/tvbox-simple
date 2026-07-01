@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TVBox 简版</string>
+
+    <!-- 主界面 -->
+    <string name="title_home">首页</string>
+    <string name="title_search">搜索</string>
+    <string name="title_settings">设置</string>
+    <string name="title_sources">视频源</string>
+    <string name="title_favorite">收藏</string>
+    <string name="title_quick">快捷入口</string>
+    <string name="title_refresh">刷新</string>
+    <string name="refreshing">已刷新</string>
+
+    <!-- 设置页 -->
+    <string name="settings_source_url_hint">视频源链接 (支持 TVBox 格式)</string>
+    <string name="settings_source_name_hint">源名称（可选）</string>
+    <string name="settings_add_source">添加视频源</string>
+    <string name="settings_test">测试</string>
+    <string name="settings_save">保存</string>
+    <string name="settings_delete">删除</string>
+    <string name="settings_empty">还没有添加视频源，点击下方按钮添加</string>
+    <string name="settings_test_ok">连接成功</string>
+    <string name="settings_test_fail">连接失败：%1$s</string>
+    <string name="settings_source_added">已添加</string>
+    <string name="settings_source_deleted">已删除</string>
+
+    <!-- 搜索 -->
+    <string name="search_hint">输入片名搜索</string>
+    <string name="search_no_results">没有找到结果</string>
+    <string name="search_need_source">请先在设置中添加视频源</string>
+
+    <!-- 通用 -->
+    <string name="loading">加载中…</string>
+    <string name="error_network">网络错误</string>
+    <string name="retry">重试</string>
+    <string name="play">播放</string>
+    <string name="back">返回</string>
+</resources>

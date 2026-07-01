@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- 网络访问（拉取源配置与视频内容） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+    <!--
+      Leanback 特性声明 required="false"：
+      - 电视会按 Leanback 模式显示
+      - 手机/平板能正常安装运行（不强依赖）
+      触屏特性同理（电视没触摸，手机有）。
+    -->
+    <uses-feature
+        android:name="android.software.leanback"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+
+    <application
+        android:name=".TvBoxApp"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:banner="${leanbackBanner}"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.TVBoxSimple"
+        tools:targetApi="31">
+
+        <!--
+          入口 activity：
+          - 同时声明 LAUNCHER + LEANBACK_LAUNCHER 两个类别
+            → 手机/平板桌面、Leanback 桌面 都能看到图标
+          - 屏幕方向交给系统决定（不强横屏），让手机/平板能用
+          - configChanges 拦截方向变化，避免 Activity 重建丢失状态
+        -->
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 设置页（手机竖屏、横屏、TV 都能用） -->
+        <activity
+            android:name=".ui.settings.SettingsActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" />
+
+        <!-- 播放页强制横屏（视频一般横屏看）但允许手机/TV 都打开 -->
+        <activity
+            android:name=".ui.player.PlayerActivity"
+            android:exported="true"
+            android:screenOrientation="sensor"
+            android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" />
+
+        <!-- 分类列表页：跟随系统方向 -->
+        <activity
+            android:name=".ui.home.CategoryActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" />
+
+        <!-- 视频详情页：跟随系统方向 -->
+        <activity
+            android:name=".ui.detail.DetailActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" />
+
+        <!-- 搜索页：跟随系统方向 -->
+        <activity
+            android:name=".ui.search.SearchActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" />
+
+        <activity
+            android:name=".ui.history.HistoryActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" />
+
+        <activity
+            android:name=".ui.remote.QrActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" />
+
+        <!-- 源详情页（点击首页"已配置源"卡片进入） -->
+        <activity
+            android:name=".ui.home.SourceDetailActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" />
+    </application>
+</manifest>

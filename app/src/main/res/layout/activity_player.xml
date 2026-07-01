@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <androidx.media3.ui.PlayerView
+        android:id="@+id/player_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- 顶部标题栏（半透明） -->
+    <TextView
+        android:id="@+id/player_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_margin="32dp"
+        android:background="#80000000"
+        android:maxWidth="900dp"
+        android:maxLines="2"
+        android:ellipsize="end"
+        android:padding="16dp"
+        android:textColor="#FFFFFF"
+        android:textSize="20sp" />
+
+    <!-- 缓冲圈 -->
+    <ProgressBar
+        android:id="@+id/player_loading"
+        android:layout_width="64dp"
+        android:layout_height="64dp"
+        android:layout_gravity="center"
+        android:indeterminateTint="#FFFFFF"
+        android:visibility="visible" />
+
+    <!-- 错误覆盖层（默认隐藏，播放失败时显示） -->
+    <LinearLayout
+        android:id="@+id/player_error_panel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#CC000000"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="48dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/player_error_icon"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="⚠"
+            android:textColor="#FF8A65"
+            android:textSize="80sp" />
+
+        <TextView
+            android:id="@+id/player_error_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:gravity="center"
+            android:text="播放失败"
+            android:textColor="#FFFFFF"
+            android:textSize="32sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/player_error_detail"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center"
+            android:maxWidth="900dp"
+            android:textColor="#FFCCCC"
+            android:textSize="18sp" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="32dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/player_retry_btn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@color/tv_primary"
+                android:paddingStart="48dp"
+                android:paddingTop="20dp"
+                android:paddingEnd="48dp"
+                android:paddingBottom="20dp"
+                android:text="@string/retry"
+                android:textColor="#FFFFFF"
+                android:textSize="20sp" />
+
+            <Button
+                android:id="@+id/player_close_btn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:background="@color/tv_card_background"
+                android:paddingStart="48dp"
+                android:paddingTop="20dp"
+                android:paddingEnd="48dp"
+                android:paddingBottom="20dp"
+                android:text="@string/back"
+                android:textColor="#FFFFFF"
+                android:textSize="20sp" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

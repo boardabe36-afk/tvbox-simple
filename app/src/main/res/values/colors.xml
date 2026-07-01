@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="tv_background">#FF0F1014</color>
+    <color name="tv_card_background">#FF1A1B22</color>
+    <color name="tv_primary">#FF4F8EF7</color>
+    <color name="tv_on_primary">#FFFFFFFF</color>
+    <color name="tv_text_primary">#FFEAEAEA</color>
+    <color name="tv_text_secondary">#FFA0A0A8</color>
+    <color name="tv_accent">#FFFF8A65</color>
+    <color name="tv_error">#FFEF5350</color>
+</resources>
