@@ -33,3 +33,7 @@ Thumbs.db
 # IDE
 .vscode/
 *.swp
+
+# Local release notes scratch
+release-notes-*.md
+
