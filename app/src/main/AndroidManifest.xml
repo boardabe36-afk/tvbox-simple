@@ -8,6 +8,12 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
     <!--
+      OTA 升级：Android 8+ 需要用户授权"安装未知来源"才能装新版本。
+      Android 7 及以下默认允许。
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!--
       Leanback 特性声明 required="false"：
       - 电视会按 Leanback 模式显示
       - 手机/平板能正常安装运行（不强依赖）
@@ -102,5 +108,19 @@
             android:name=".ui.douban.DoubanActivity"
             android:exported="false"
             android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" />
+
+        <!--
+          FileProvider：把 cache/ota/ 目录下的 APK 共享给系统安装器
+          路径配置见 res/xml/file_paths.xml
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

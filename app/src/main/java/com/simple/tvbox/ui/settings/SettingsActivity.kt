@@ -16,6 +16,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.simple.tvbox.R
 import com.simple.tvbox.TvBoxApp
 import com.simple.tvbox.model.Source
+import com.simple.tvbox.update.OtaUpdater
 import com.simple.tvbox.util.SettingsPrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -84,6 +85,26 @@ class SettingsActivity : FragmentActivity() {
         // 整行也可点击切换（TV 端友好）
         findViewById<android.widget.LinearLayout>(R.id.settings_douban_section)
             .setOnClickListener { doubanToggle.performClick() }
+
+        // OTA 升级
+        val versionText = findViewById<TextView>(R.id.settings_version_text)
+        val checkUpdateBtn = findViewById<Button>(R.id.settings_check_update_btn)
+        val progressBar = findViewById<android.widget.ProgressBar>(R.id.settings_update_progress)
+        val updateStatus = findViewById<TextView>(R.id.settings_update_status)
+        // 当前版本号
+        try {
+            val pInfo = packageManager.getPackageInfo(packageName, 0)
+            versionText.text = "当前版本: v${pInfo.versionName} (code ${pInfo.versionCode})"
+        } catch (e: Exception) {
+            versionText.text = "当前版本: --"
+        }
+        val otaUpdater = OtaUpdater(this, this)
+        checkUpdateBtn.setOnClickListener {
+            otaUpdater.checkAndUpdate(progressBar, updateStatus)
+        }
+        // 整行可点击（TV 端友好）
+        findViewById<android.widget.LinearLayout>(R.id.settings_ota_section)
+            .setOnClickListener { checkUpdateBtn.performClick() }
 
         // 关键 UX：键盘"完成/Done"键直接保存（按完键盘不用再去找按钮）
         urlInput.setOnEditorActionListener { _, actionId, event ->

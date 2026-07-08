@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:background="@color/tv_background">
+
+    <TextView
+        android:id="@+id/ota_progress_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="正在下载更新"
+        android:textColor="@color/tv_text_primary"
+        android:textSize="20sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/ota_progress_sub"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:textColor="@color/tv_text_secondary"
+        android:textSize="14sp" />
+
+    <ProgressBar
+        android:id="@+id/ota_progress_bar"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:max="100"
+        android:progress="0" />
+
+    <TextView
+        android:id="@+id/ota_progress_detail"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="0%"
+        android:textColor="@color/tv_text_secondary"
+        android:textSize="13sp" />
+
+    <Button
+        android:id="@+id/ota_progress_cancel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end"
+        android:layout_marginTop="16dp"
+        android:background="@color/tv_card_background"
+        android:minWidth="100dp"
+        android:text="取消"
+        android:textColor="@color/tv_text_primary"
+        android:textSize="14sp" />
+</LinearLayout>
