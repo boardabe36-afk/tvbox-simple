@@ -91,20 +91,48 @@ class SearchActivity : FragmentActivity() {
                 }
 
                 val ranked: List<SearchResult> = withContext(Dispatchers.IO) {
-                    sites.map { site ->
+                    // 同步过滤支持的源
+                    val supportedSites = sites.filter { VideoClientFactory.create(it).isSupported() }
+                    supportedSites.map { site ->
                         async {
                             runCatching {
                                 val client = VideoClientFactory.create(site)
                                 if (client.isSupported()) {
-                                    client.search(keyword, 1).map { v ->
-                                        SearchResult(site, v, score(keyword, v.title, v.subTitle))
-                                    }
+                                    // 1. 原始搜索
+                                    val primaryResults = client.search(keyword, 1)
+                                        .map { v ->
+                                            SearchResult(
+                                                site,
+                                                v,
+                                                MatchScorer.score(keyword, v.title, v.subTitle)
+                                            )
+                                        }
+                                    // 2. 同时跑"清理后标题"作为副查询（处理 "三体" vs "三体2：黑暗森林"）
+                                    val cleanedTitle = stripSearchNoise(keyword)
+                                    val secondaryResults = if (cleanedTitle.isNotBlank() && cleanedTitle != keyword) {
+                                        runCatching {
+                                            client.search(cleanedTitle, 1).map { v ->
+                                                SearchResult(
+                                                    site,
+                                                    v,
+                                                    MatchScorer.score(cleanedTitle, v.title, v.subTitle) - 200
+                                                )
+                                            }
+                                        }.getOrDefault(emptyList())
+                                    } else emptyList()
+                                    (primaryResults + secondaryResults)
                                 } else emptyList()
                             }.getOrDefault(emptyList())
                         }
                     }.awaitAll()
                         .flatten()
-                        .distinctBy { it.site.key + "::" + it.item.id }
+                        // 同站同视频去重（同 id 不同结果时取高分）
+                        .groupBy { it.site.key + "::" + it.item.id }
+                        .map { (_, group) -> group.maxByOrNull { it.score }!! }
+                        // 过滤掉明显负分（完全无关）
+                        .filter { it.score > -1000 }
+                        // 排序：高分优先；同时控制同源霸榜（同源 top 3，后续扣分）
+                        .let { dedupBySiteTop3(it) }
                         .sortedWith(
                             compareByDescending<SearchResult> { it.score }
                                 .thenBy { it.item.title.length }
@@ -189,45 +217,41 @@ class SearchActivity : FragmentActivity() {
         return card
     }
 
-    private fun score(keyword: String, title: String, subTitle: String?): Int {
-        val q = normalize(keyword)
-        val t = normalize(title)
-        val sub = normalize(subTitle.orEmpty())
-        if (q.isBlank() || t.isBlank()) return 0
-        var s = 0
-        when {
-            t == q -> s += 10_000
-            t.startsWith(q) -> s += 8_000
-            t.contains(q) -> s += 6_000
-            q.contains(t) -> s += 4_000
+    /**
+     * 搜索噪音词（用于二次搜索的 query 清理）
+     */
+    private val SEARCH_NOISE = listOf(
+        "1080p", "720p", "4k", "8k", "hd", "bd",
+        "国语", "粤语", "中字", "双语", "高清", "蓝光",
+        "全集", "完整版", "更新至", "完结"
+    )
+
+    /**
+     * 去掉搜索关键词里的噪音词（保留原始中文部分）。
+     * 用于跑第二次搜索以提高匹配率。
+     */
+    private fun stripSearchNoise(keyword: String): String {
+        var k = keyword
+        for (n in SEARCH_NOISE) {
+            k = k.replace(Regex("(?i)\\b" + Regex.escape(n) + "\\b"), "")
         }
-        val compactQ = q.replace(" ", "")
-        val compactT = t.replace(" ", "")
-        when {
-            compactT == compactQ -> s += 5_000
-            compactT.startsWith(compactQ) -> s += 3_000
-            compactT.contains(compactQ) -> s += 2_000
-        }
-        s += commonSubsequenceScore(compactQ, compactT) * 20
-        if (sub.contains(q) || sub.contains(compactQ)) s += 300
-        s -= kotlin.math.abs(compactT.length - compactQ.length) * 8
-        return s
+        k = k.replace(Regex("[\\[\\]【】()（）]"), " ")
+        return k.trim().replace(Regex("\\s+"), " ")
     }
 
-    private fun normalize(s: String): String = s.lowercase()
-        .replace(Regex("[\\s·・:：,，.。!！?？《》<>\\[\\]（）()_\\-]+"), " ")
-        .trim()
-
-    private fun commonSubsequenceScore(a: String, b: String): Int {
-        var i = 0
-        var hit = 0
-        for (ch in b) {
-            if (i < a.length && a[i] == ch) {
-                hit++
-                i++
-            }
+    /**
+     * 同源去重：每个 sourceKey 最多保留 top 3 结果，超过的每多 1 条扣 1500 分。
+     * 防止单个源霸榜前 100。
+     */
+    private fun dedupBySiteTop3(results: List<SearchResult>): List<SearchResult> {
+        val bySite = results.groupBy { it.site.key }
+        return bySite.flatMap { (_, list) ->
+            list.sortedByDescending { it.score }
+                .mapIndexed { idx, r ->
+                    if (idx < 3) r
+                    else r.copy(score = r.score - (idx - 2) * 1500)
+                }
         }
-        return hit
     }
 
     private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()

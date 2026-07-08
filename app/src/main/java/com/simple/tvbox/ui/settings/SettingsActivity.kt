@@ -16,6 +16,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.simple.tvbox.R
 import com.simple.tvbox.TvBoxApp
 import com.simple.tvbox.model.Source
+import com.simple.tvbox.util.SettingsPrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -62,6 +63,27 @@ class SettingsActivity : FragmentActivity() {
             addSource(Source.Kind.HTML)
         }
         findViewById<Button>(R.id.settings_test_btn).setOnClickListener { testSource() }
+
+        // 豆瓣开关
+        val doubanToggle = findViewById<Button>(R.id.settings_douban_toggle)
+        fun renderDoubanToggle() {
+            val enabled = SettingsPrefs.isDoubanEnabled(this)
+            doubanToggle.text = if (enabled) "关闭" else "开启"
+        }
+        renderDoubanToggle()
+        doubanToggle.setOnClickListener {
+            val newVal = !SettingsPrefs.isDoubanEnabled(this)
+            SettingsPrefs.setDoubanEnabled(this, newVal)
+            renderDoubanToggle()
+            Toast.makeText(
+                this,
+                if (newVal) "豆瓣热门已开启" else "豆瓣热门已关闭",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+        // 整行也可点击切换（TV 端友好）
+        findViewById<android.widget.LinearLayout>(R.id.settings_douban_section)
+            .setOnClickListener { doubanToggle.performClick() }
 
         // 关键 UX：键盘"完成/Done"键直接保存（按完键盘不用再去找按钮）
         urlInput.setOnEditorActionListener { _, actionId, event ->

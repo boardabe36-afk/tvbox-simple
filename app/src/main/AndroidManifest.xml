@@ -96,5 +96,11 @@
             android:name=".ui.home.SourceDetailActivity"
             android:exported="false"
             android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" />
+
+        <!-- 豆瓣浏览页（首页"豆瓣热门"入口进入） -->
+        <activity
+            android:name=".ui.douban.DoubanActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" />
     </application>
 </manifest>

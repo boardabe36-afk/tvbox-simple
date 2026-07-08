@@ -118,6 +118,30 @@ object HttpUtil {
         return current
     }
 
+    /**
+     * 抓取豆瓣 JSON。固定 UA + Referer=https://movie.douban.com/。
+     *
+     * 历史踩坑：
+     * - 豆瓣对 UA 比较严格，移动端 UA 会被弹验证码或 418
+     * - 必须带 Referer 才能拿到完整字段（不带的 cover 是空字符串）
+     */
+    fun fetchDoubanJson(url: String): String {
+        val req = Request.Builder()
+            .url(url)
+            .header("User-Agent", USER_AGENT)
+            .header("Referer", "https://movie.douban.com/")
+            .header("Accept", "application/json,text/plain,*/*")
+            .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+            .build()
+        client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) {
+                throw IllegalStateException("HTTP ${resp.code} for $url")
+            }
+            val body = resp.body ?: throw IllegalStateException("空响应: $url")
+            return body.string()
+        }
+    }
+
     private fun buildRequest(url: String, referer: String?, uaPref: UserAgentPreference): Request {
         val ua = when (uaPref) {
             UserAgentPreference.AUTO -> USER_AGENT  // 默认用 PC UA，源站对 PC 返回完整内容

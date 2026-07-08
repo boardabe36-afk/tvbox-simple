@@ -57,6 +57,53 @@
             android:layout_marginTop="24dp"
             android:background="@color/tv_card_background" />
 
+        <!-- 豆瓣开关区 -->
+        <LinearLayout
+            android:id="@+id/settings_douban_section"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:background="@color/tv_card_background"
+            android:orientation="horizontal"
+            android:padding="20dp"
+            android:focusable="true">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="豆瓣热门"
+                    android:textColor="@color/tv_text_primary"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="开启后首页显示豆瓣热门电影/电视剧，点击自动搜索你已配置的源播放"
+                    android:textColor="@color/tv_text_secondary"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/settings_douban_toggle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:layout_marginStart="16dp"
+                android:background="@color/tv_primary"
+                android:minWidth="100dp"
+                android:text="开启"
+                android:textColor="@color/tv_on_primary"
+                android:textSize="16sp" />
+        </LinearLayout>
+
         <EditText
             android:id="@+id/settings_name_input"
             android:layout_width="match_parent"

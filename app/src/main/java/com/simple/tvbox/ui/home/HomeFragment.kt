@@ -17,12 +17,20 @@ import com.simple.tvbox.TvBoxApp
 import com.simple.tvbox.model.Source
 import com.simple.tvbox.model.SpiderSite
 import com.simple.tvbox.model.VideoCategory
+import com.simple.tvbox.model.VideoItem
+import com.simple.tvbox.source.DoubanService
 import com.simple.tvbox.source.VideoClientFactory
+import com.simple.tvbox.ui.douban.DoubanActivity
 import com.simple.tvbox.ui.history.HistoryActivity
 import com.simple.tvbox.ui.remote.QrActivity
+import com.simple.tvbox.ui.search.MatchScorer
 import com.simple.tvbox.ui.search.SearchActivity
 import com.simple.tvbox.ui.settings.SettingsActivity
+import com.simple.tvbox.util.SettingsPrefs
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -101,6 +109,10 @@ class HomeFragment : BrowseSupportFragment() {
                 }
                 startActivity(intent)
             }
+            is DoubanPosterCard -> {
+                // 首页豆瓣卡片点击 → 聚合搜索真实视频源 top1 → 播放
+                onDoubanPosterClicked(item)
+            }
             is ActionItem -> item.onClick()
         }
     }
@@ -112,6 +124,10 @@ class HomeFragment : BrowseSupportFragment() {
                 val sources = TvBoxApp.get().sourceRepository.getAllSources()
                 // 快捷入口不依赖视频源：首次安装/未添加源时也必须可用（扫码设置、扫码传文件等）。
                 renderQuickEntryRow()
+                // 豆瓣行：受设置开关控制，默认开启
+                if (SettingsPrefs.isDoubanEnabled(requireContext())) {
+                    renderDoubanRow()
+                }
                 if (sources.isEmpty()) {
                     renderEmptyState()
                     return@launch
@@ -156,25 +172,237 @@ class HomeFragment : BrowseSupportFragment() {
         rowAdapter.add(ActionItem(id = HEADER_QUICK * 100 + 2, title = "最近观看") {
             startActivity(Intent(requireContext(), HistoryActivity::class.java))
         })
-        rowAdapter.add(ActionItem(id = HEADER_QUICK * 100 + 3, title = "扫码搜索") {
+        rowAdapter.add(ActionItem(id = HEADER_QUICK * 100 + 3, title = "豆瓣热门") {
+            startActivity(DoubanActivity.intent(requireContext(), DoubanActivity.TAB_HOME))
+        })
+        rowAdapter.add(ActionItem(id = HEADER_QUICK * 100 + 4, title = "扫码搜索") {
             startActivity(QrActivity.intent(requireContext(), QrActivity.MODE_SEARCH))
         })
-        rowAdapter.add(ActionItem(id = HEADER_QUICK * 100 + 4, title = "扫码传文件") {
+        rowAdapter.add(ActionItem(id = HEADER_QUICK * 100 + 5, title = "扫码传文件") {
             startActivity(QrActivity.intent(requireContext(), QrActivity.MODE_UPLOAD))
         })
-        rowAdapter.add(ActionItem(id = HEADER_QUICK * 100 + 5, title = "扫码设置") {
+        rowAdapter.add(ActionItem(id = HEADER_QUICK * 100 + 6, title = "扫码设置") {
             startActivity(QrActivity.intent(requireContext(), QrActivity.MODE_SETTINGS))
         })
-        rowAdapter.add(ActionItem(id = HEADER_QUICK * 100 + 6, title = getString(R.string.title_settings)) {
+        rowAdapter.add(ActionItem(id = HEADER_QUICK * 100 + 7, title = getString(R.string.title_settings)) {
             startActivity(Intent(requireContext(), SettingsActivity::class.java))
         })
-        rowAdapter.add(ActionItem(id = HEADER_QUICK * 100 + 7, title = getString(R.string.title_refresh)) {
+        rowAdapter.add(ActionItem(id = HEADER_QUICK * 100 + 8, title = getString(R.string.title_refresh)) {
             // 手动刷新：清空所有缓存后重新加载
             TvBoxApp.get().sourceRepository.invalidateCache()
             Toast.makeText(requireContext(), R.string.refreshing, Toast.LENGTH_SHORT).show()
             loadHome()
         })
         rowsAdapter.add(ListRow(header, rowAdapter))
+    }
+
+    /**
+     * 行 1.5：豆瓣热门（电影+电视剧），独立行，独立 Presenter
+     *
+     * 点击 → 聚合搜索所有视频源 → top1 → DetailActivity 播放
+     * 无源时 → 浏览器打开豆瓣详情页
+     */
+    private fun renderDoubanRow() {
+        // 顶部"豆瓣频道"快捷入口行：电影 / 电视剧 / Top250
+        val headerRow = HeaderItem(HEADER_DOUBAN_QUICK, "豆瓣 · 频道")
+        val actionAdapter = ArrayObjectAdapter(ActionPresenter())
+        actionAdapter.add(ActionItem(id = 1, title = "豆瓣首页") {
+            startActivity(DoubanActivity.intent(requireContext(), DoubanActivity.TAB_HOME))
+        })
+        actionAdapter.add(ActionItem(id = 2, title = "豆瓣电影") {
+            startActivity(DoubanActivity.intent(requireContext(), DoubanActivity.TAB_MOVIE))
+        })
+        actionAdapter.add(ActionItem(id = 3, title = "豆瓣电视剧") {
+            startActivity(DoubanActivity.intent(requireContext(), DoubanActivity.TAB_TV))
+        })
+        rowsAdapter.add(ListRow(headerRow, actionAdapter))
+
+        // 豆瓣热门电影海报行
+        renderDoubanPosterRow(
+            rowIndex = HEADER_DOUBAN_MOVIE,
+            headerTitle = "豆瓣 · 热门电影",
+            type = DoubanService.DoubanMediaType.MOVIE,
+            tag = "热门",
+            limit = 30
+        )
+
+        // 豆瓣热门电视剧海报行
+        renderDoubanPosterRow(
+            rowIndex = HEADER_DOUBAN_TV,
+            headerTitle = "豆瓣 · 热门电视剧",
+            type = DoubanService.DoubanMediaType.TV,
+            tag = "热门",
+            limit = 30
+        )
+    }
+
+    private fun renderDoubanPosterRow(
+        rowIndex: Long,
+        headerTitle: String,
+        type: DoubanService.DoubanMediaType,
+        tag: String,
+        limit: Int
+    ) {
+        val rowAdapter = ArrayObjectAdapter(DoubanPosterPresenter())
+        // 占位卡片
+        rowAdapter.add(DoubanPosterCard(
+            id = "_placeholder_",
+            title = "正在加载豆瓣内容…",
+            subTitle = headerTitle,
+            poster = null,
+            detailUrl = "",
+            item = null
+        ))
+        val row = ListRow(HeaderItem(rowIndex, headerTitle), rowAdapter)
+        rowsAdapter.add(row)
+
+        lifecycleScope.launch {
+            runCatching {
+                val items = DoubanService.fetch(type, tag, limit = limit, page = 1)
+                if (rowsAdapter.indexOf(row) < 0) return@runCatching
+                rowAdapter.clear()
+                if (items.isEmpty()) {
+                    rowAdapter.add(DoubanPosterCard(
+                        id = "_empty_",
+                        title = "暂无豆瓣内容",
+                        subTitle = "请检查网络或稍后刷新",
+                        poster = null,
+                        detailUrl = "",
+                        item = null
+                    ))
+                } else {
+                    items.forEach { item ->
+                        rowAdapter.add(DoubanPosterCard(
+                            id = item.id,
+                            title = item.title,
+                            subTitle = buildString {
+                                if (item.rate.isNotBlank()) append("豆瓣 ").append(item.rate)
+                                if (item.isNew) {
+                                    if (isNotEmpty()) append(" · ")
+                                    append("新")
+                                }
+                            }.ifEmpty { null },
+                            poster = item.cover.ifBlank { null },
+                            detailUrl = item.detailUrl,
+                            item = item
+                        ))
+                    }
+                }
+            }.onFailure {
+                if (rowsAdapter.indexOf(row) >= 0) {
+                    rowAdapter.clear()
+                    rowAdapter.add(DoubanPosterCard(
+                        id = "_error_",
+                        title = "豆瓣加载失败",
+                        subTitle = it.message ?: it.javaClass.simpleName,
+                        poster = null,
+                        detailUrl = "",
+                        item = null
+                    ))
+                }
+            }
+        }
+    }
+
+    /**
+     * 首页豆瓣卡片点击：用标题聚合搜索所有视频源，命中 top1 进 DetailActivity。
+     */
+    private fun onDoubanPosterClicked(card: DoubanPosterCard) {
+        if (card.item == null) return
+        Toast.makeText(requireContext(), "正在搜索: ${card.title}", Toast.LENGTH_SHORT).show()
+        lifecycleScope.launch {
+            try {
+                val sources = TvBoxApp.get().sourceRepository.getAllSources()
+                if (sources.isEmpty()) {
+                    // 没视频源 → 浏览器打开豆瓣详情页
+                    openInBrowser(card.detailUrl)
+                    return@launch
+                }
+                val sites = withContext(Dispatchers.IO) {
+                    TvBoxApp.get().sourceRepository.loadAllSites()
+                }
+                if (sites.isEmpty()) {
+                    openInBrowser(card.detailUrl)
+                    return@launch
+                }
+                // 多查询
+                val queries = buildDoubanSearchQueries(card.title)
+                val ranked: List<Pair<SpiderSite, VideoItem>> = withContext(Dispatchers.IO) {
+                    val collected: MutableList<Triple<SpiderSite, VideoItem, Int>> = mutableListOf()
+                    // 并发按站点查询（避免串行时单站 timeout 卡住其他站）
+                    coroutineScope {
+                        val deferreds = sites.map { site ->
+                            async(Dispatchers.IO) {
+                                val client = VideoClientFactory.create(site)
+                                if (!client.isSupported()) return@async emptyList<Triple<SpiderSite, VideoItem, Int>>()
+                                val local = mutableListOf<Triple<SpiderSite, VideoItem, Int>>()
+                                for (q in queries) {
+                                    val items: List<VideoItem> = runCatching { client.search(q, 1) }
+                                        .getOrDefault(emptyList())
+                                    for (v in items) {
+                                        local.add(Triple(site, v, MatchScorer.score(q, v.title, v.subTitle)))
+                                    }
+                                }
+                                local
+                            }
+                        }
+                        for (d in deferreds) collected.addAll(d.await())
+                    }
+                    collected
+                        .groupBy { it.first.key + "::" + it.second.id }
+                        .map { (_, g) -> g.maxByOrNull { x -> x.third }!! }
+                        .filter { it.third > 500 }
+                        .sortedWith(
+                            compareByDescending<Triple<SpiderSite, VideoItem, Int>> { it.third }
+                                .thenBy { it.second.title.length }
+                        )
+                        .map { it.first to it.second }
+                }
+                val top = ranked.firstOrNull()
+                if (top != null) {
+                    startActivity(
+                        com.simple.tvbox.ui.detail.DetailActivity.intent(
+                            requireContext(),
+                            siteKey = top.first.key,
+                            videoId = top.second.id,
+                            title = top.second.title
+                        )
+                    )
+                } else {
+                    Toast.makeText(requireContext(), "暂未找到资源", Toast.LENGTH_SHORT).show()
+                    openInBrowser(card.detailUrl)
+                }
+            } catch (t: Throwable) {
+                Toast.makeText(requireContext(), "搜索失败: ${t.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun buildDoubanSearchQueries(rawTitle: String): List<String> {
+        val out = LinkedHashSet<String>()
+        val original = rawTitle.trim()
+        if (original.isNotEmpty()) out.add(original)
+        val noParens = original
+            .replace(Regex("[\\[\\]【】()（）].*?[\\[\\]【】()（）]"), "")
+            .replace(Regex("[\\[\\]【】()（）]"), "")
+            .trim()
+        if (noParens.isNotEmpty() && noParens != original) out.add(noParens)
+        val cleaned = noParens
+            .replace(Regex("\\s*(19|20)\\d{2}\\s*$"), "")
+            .replace(Regex("\\s*第[一二三四五六七八九十0-9]+季\\s*$"), "")
+            .replace(Regex("\\s*Season\\s*[0-9]+\\s*$", RegexOption.IGNORE_CASE), "")
+            .trim()
+        if (cleaned.isNotEmpty() && cleaned != noParens && cleaned != original) out.add(cleaned)
+        return out.toList()
+    }
+
+    private fun openInBrowser(url: String) {
+        if (url.isBlank()) return
+        runCatching {
+            startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+        }.onFailure {
+            Toast.makeText(requireContext(), "未找到浏览器", Toast.LENGTH_LONG).show()
+        }
     }
 
     /**
@@ -394,6 +622,9 @@ class HomeFragment : BrowseSupportFragment() {
         private const val HEADER_EMPTY = 1L
         private const val HEADER_HOT = 2L
         private const val HEADER_SOURCES = 3L
+        private const val HEADER_DOUBAN_QUICK = 10L
+        private const val HEADER_DOUBAN_MOVIE = 11L
+        private const val HEADER_DOUBAN_TV = 12L
         private const val HEADER_SITES = 100L
     }
 }
@@ -418,4 +649,14 @@ data class VideoCard(
     val videoId: String? = null,
     val historySubtitle: String? = null,
     val isHistory: Boolean = false
+)
+
+/** 首页豆瓣海报卡片（点击触发聚合搜索） */
+data class DoubanPosterCard(
+    val id: String,
+    val title: String,
+    val subTitle: String?,
+    val poster: String?,
+    val detailUrl: String,
+    val item: DoubanService.DoubanItem? = null
 )
