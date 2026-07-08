@@ -110,15 +110,23 @@ object DoubanService {
         limit: Int = 30,
         page: Int = 1
     ): List<DoubanItem> = withContext(Dispatchers.IO) {
-        runCatching {
+        try {
             val url = "https://movie.douban.com/j/search_subjects" +
                 "?type=${type.apiValue}" +
                 "&tag=" + java.net.URLEncoder.encode(tag, "UTF-8") +
                 "&page_limit=" + limit.coerceIn(1, 50) +
                 "&page_start=" + ((page - 1).coerceAtLeast(0) * limit.coerceIn(1, 50))
-            val text = HttpUtil.fetchDoubanJson(url)
-            parseList(text, type)
-        }.getOrDefault(emptyList())
+            android.util.Log.i("DoubanService", "fetching: $url")
+            // 豆瓣接口走 HttpURLConnection 直连（更稳，避免 OkHttp 4.12.0 ResponseBody 转码 bug）
+            val text = DoubanDirect.fetch(url)
+            android.util.Log.i("DoubanService", "got ${text.length} chars, head: ${text.take(150)}")
+            val items = parseList(text, type)
+            android.util.Log.i("DoubanService", "parsed ${items.size} items")
+            items
+        } catch (t: Throwable) {
+            android.util.Log.e("DoubanService", "fetch FAILED tag=$tag type=${type.apiValue}", t)
+            emptyList()
+        }
     }
 
     /**
@@ -149,7 +157,12 @@ object DoubanService {
      */
     private fun parseList(text: String, type: DoubanMediaType): List<DoubanItem> {
         if (text.isBlank()) return emptyList()
-        val root = runCatching { jsonParser.getJSONObject(text) }.getOrNull() ?: return emptyList()
+        // 关键：用 JSONObject(text) 构造器解析 JSON 字符串
+        // 之前错误：jsonParser.getJSONObject(text) 是按 key 取 nested object，不是 parse
+        val root = runCatching { JSONObject(text) }.getOrNull() ?: run {
+            android.util.Log.e("DoubanService", "JSON parse failed, text head: ${text.take(200)}")
+            return emptyList()
+        }
         val arr = root.optJSONArray("subjects") ?: return emptyList()
         val out = ArrayList<DoubanItem>(arr.length())
         for (i in 0 until arr.length()) {

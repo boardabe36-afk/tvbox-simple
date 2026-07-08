@@ -35,6 +35,15 @@ object HttpUtil {
         .readTimeout(20, TimeUnit.SECONDS)
         .writeTimeout(20, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
+        // 关键：不使用系统全局代理。避免用户在系统设置里设了 HTTP 代理后，
+        // APP 莫名走到 127.0.0.1:7897 之类的不可达端口（Clash 关闭 / 手机没开代理时）。
+        // 历史踩坑：模拟器 + 用户手机上都曾因 system proxy 7897 不可达导致豆瓣 + OTA 全部超时。
+        .proxy(java.net.Proxy.NO_PROXY)
+        .proxySelector(object : java.net.ProxySelector() {
+            override fun select(uri: java.net.URI?): List<java.net.Proxy> =
+                listOf(java.net.Proxy.NO_PROXY)
+            override fun connectFailed(uri: java.net.URI?, sa: java.net.SocketAddress?, ioe: java.io.IOException?) {}
+        })
         .build()
 
     /**
@@ -56,7 +65,10 @@ object HttpUtil {
                 throw IllegalStateException("HTTP ${resp.code} for $url")
             }
             val body = resp.body ?: throw IllegalStateException("空响应: $url")
-            val bytes = body.bytes()
+            // 关键：用 body.byteStream() 拿原始字节（不走 charset 转换）。
+            // OkHttp 4.x 的 body.bytes() 会按 Content-Type 里的 charset 自动转码，导致
+            // 无 charset 头时按 ISO-8859-1 解 UTF-8 中文（输出乱码）。
+            val bytes = body.byteStream().readBytes()
             val headerCharset = charset ?: parseCharsetFromHeader(resp.header("Content-Type"))
             // 先用 ASCII 预览读取 meta charset，避免在未知编码下先把全文解坏。
             val metaCharset = parseCharsetFromMeta(asciiPreview(bytes))
@@ -138,10 +150,24 @@ object HttpUtil {
                 throw IllegalStateException("HTTP ${resp.code} for $url")
             }
             val body = resp.body ?: throw IllegalStateException("空响应: $url")
-            return body.string()
+            // 关键：用 body.byteStream() 拿原始字节（不走 charset 转换）。
+            val rawBytes = body.byteStream().readBytes()
+            val headerCharset = parseCharsetFromHeader(resp.header("Content-Type"))
+            val charset = headerCharset ?: "UTF-8"
+            return String(rawBytes, Charset.forName(charset))
         }
     }
 
+    private fun ByteArray.indexOfFirstSubsequence(pattern: ByteArray): Int {
+        if (pattern.isEmpty() || pattern.size > this.size) return -1
+        outer@ for (i in 0..this.size - pattern.size) {
+            for (j in pattern.indices) {
+                if (this[i + j] != pattern[j]) continue@outer
+            }
+            return i
+        }
+        return -1
+    }
     private fun buildRequest(url: String, referer: String?, uaPref: UserAgentPreference): Request {
         val ua = when (uaPref) {
             UserAgentPreference.AUTO -> USER_AGENT  // 默认用 PC UA，源站对 PC 返回完整内容

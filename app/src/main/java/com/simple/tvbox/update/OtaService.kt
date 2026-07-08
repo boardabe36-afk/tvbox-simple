@@ -36,8 +36,12 @@ object OtaService {
 
     private const val TAG = "OtaService"
 
-    /** OTA JSON 地址（固定写到代码里，未来要改可提到 SettingsPrefs） */
-    const val OTA_URL = "https://1x1jt2.cn/app/ota-tvbox.json"
+    /** OTA JSON 地址（固定写到代码里，未来要改可提到 SettingsPrefs）
+     *
+     * 历史踩坑：证书 CN/SAN 是 www.1x1jt2.cn，所以 URL 必须带 www；
+     * 用 1x1jt2.cn 不带 www 会报 SSLPeerUnverifiedException。
+     */
+    const val OTA_URL = "https://www.1x1jt2.cn/app/ota-tvbox.json"
 
     /** APK 下载保存目录（在 app 私有 cache 目录，无需权限） */
     private fun apkDir(ctx: Context): File {
@@ -68,8 +72,17 @@ object OtaService {
      * 拉取并解析 ota.json。失败抛异常。
      */
     suspend fun fetchUpdateInfo(): UpdateInfo = withContext(Dispatchers.IO) {
-        val text = HttpUtil.fetchText(OTA_URL)
-        parse(text)
+        try {
+            android.util.Log.i(TAG, "fetching ota: $OTA_URL")
+            val text = HttpUtil.fetchText(OTA_URL)
+            android.util.Log.i(TAG, "got ${text.length} chars")
+            val info = parse(text)
+            android.util.Log.i(TAG, "parsed: v${info.versionName} code=${info.versionCode}")
+            info
+        } catch (t: Throwable) {
+            android.util.Log.e(TAG, "fetchUpdateInfo FAILED", t)
+            throw t
+        }
     }
 
     /**
