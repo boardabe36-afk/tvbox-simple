@@ -122,28 +122,63 @@ class HomeFragment : BrowseSupportFragment() {
         lifecycleScope.launch {
             try {
                 val sources = TvBoxApp.get().sourceRepository.getAllSources()
-                // 快捷入口不依赖视频源：首次安装/未添加源时也必须可用（扫码设置、扫码传文件等）。
+                // 快捷入口不依赖视频源
                 renderQuickEntryRow()
-                // 豆瓣行：受设置开关控制，默认开启
-                if (SettingsPrefs.isDoubanEnabled(requireContext())) {
-                    renderDoubanRow()
-                }
                 if (sources.isEmpty()) {
                     renderEmptyState()
                     return@launch
                 }
-                // 已有源：继续渲染丰富首页
-                renderHotVideoRows()
-                renderConfiguredSourcesRow(sources)
-                renderSiteCategoryRows(sources)
+                // 关键防御：任何一行渲染失败都不能影响其他行 (否则 "界面全空")
+                // 顺序：先添加所有同步行，最后才添加豆瓣行
+                // 原因：renderDoubanRow 内部的 lifecycleScope.launch 异步协程会触发 RecyclerView layout，
+                // 如果在同步行之前调用，后续 rowsAdapter.add() 的行不会被渲染（Leanback bug）
+                runCatching { renderConfiguredSourcesRow(sources) }
+                    .onFailure { android.util.Log.e("HomeFragment", "renderConfiguredSourcesRow failed", it) }
+                runCatching { renderHotVideoRows() }
+                    .onFailure { android.util.Log.e("HomeFragment", "renderHotVideoRows failed", it) }
+                runCatching { renderSiteCategoryRows(sources) }
+                    .onFailure { android.util.Log.e("HomeFragment", "renderSiteCategoryRows failed", it) }
+                // 豆瓣行放最后（内部的异步 launch 不影响已添加的同步行）
+                if (SettingsPrefs.isDoubanEnabled(requireContext())) {
+                    renderDoubanRow()
+                }
+                // 兑底：如果上面都失败了，至少让用户看到“已配置 X 个源”的提示行
+                if (rowsAdapter.size() <= 1) {
+                    renderLoadFailedHint(sources)
+                }
             } catch (t: Throwable) {
+                android.util.Log.e("HomeFragment", "loadHome fatal", t)
                 Toast.makeText(
                     requireContext(),
                     "加载源失败：${t.message}",
                     Toast.LENGTH_LONG
                 ).show()
+                // 兑底：保证至少看到快捷入口 + 加载提示
+                if (rowsAdapter.size() == 0) {
+                    renderQuickEntryRow()
+                    renderLoadFailedHint(emptyList())
+                }
             }
         }
+    }
+
+    /**
+     * 兑底行：当源加载失败时，显示"已配置 X 个源，加载失败，点击重试"
+     */
+    private fun renderLoadFailedHint(sources: List<com.simple.tvbox.model.Source>) {
+        val header = HeaderItem(999L, "视频源加载失败")
+        val rowAdapter = ArrayObjectAdapter(ActionPresenter())
+        rowAdapter.add(ActionItem(id = 9991, title = "重试加载", subTitle = "重新连接已配置的源") {
+            TvBoxApp.get().sourceRepository.invalidateCache()
+            loadHome()
+        })
+        if (sources.isNotEmpty()) {
+            rowAdapter.add(ActionItem(id = 9992, title = "已配置 ${sources.size} 个源（点重试）", subTitle = sources.joinToString(" · ") { it.name }) {})
+        }
+        rowAdapter.add(ActionItem(id = 9993, title = "去设置检查", subTitle = "查看源配置 / 重新添加") {
+            startActivity(Intent(requireContext(), com.simple.tvbox.ui.settings.SettingsActivity::class.java))
+        })
+        rowsAdapter.add(ListRow(header, rowAdapter))
     }
 
     private fun renderEmptyState() {
