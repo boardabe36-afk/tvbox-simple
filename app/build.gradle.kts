@@ -37,8 +37,8 @@ android {
         applicationId = "com.simple.tvbox"
         minSdk = 21
         targetSdk = 34
-        versionCode = 13
-        versionName = "1.0.12"
+        versionCode = 14
+        versionName = "1.0.13"
 
         // Leanback 必需
         manifestPlaceholders["leanbackBanner"] = "@drawable/app_icon"
