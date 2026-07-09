@@ -25,7 +25,7 @@ class GenericHtmlClient(rawRoot: String) : VideoClient {
         if (probed) return
         probed = true
         val html = try {
-            HttpUtil.fetchText(baseUrl, referer = baseUrl)
+            HttpUtil.fetchText(baseUrl, referer = baseUrl, useProxy = true)
         } catch (t: Throwable) {
             throw IOException("站点探测失败：${t.message ?: t.javaClass.simpleName}", t)
         }
@@ -45,7 +45,7 @@ class GenericHtmlClient(rawRoot: String) : VideoClient {
         ensureProbed()
         if (template == Template.UNKNOWN) return emptyList()
         val url = buildCategoryUrl(categoryId, page)
-        val html = runCatching { HttpUtil.fetchText(url, referer = baseUrl) }.getOrNull() ?: return emptyList()
+        val html = runCatching { HttpUtil.fetchText(url, referer = baseUrl, useProxy = true) }.getOrNull() ?: return emptyList()
         return parseVideoList(html, baseUrl)
     }
 
@@ -61,7 +61,7 @@ class GenericHtmlClient(rawRoot: String) : VideoClient {
             "$baseUrl/index.php?m=vod-search&wd=$encoded",
         )
         for (url in candidates) {
-            val html = runCatching { HttpUtil.fetchText(url, referer = baseUrl) }.getOrNull() ?: continue
+            val html = runCatching { HttpUtil.fetchText(url, referer = baseUrl, useProxy = true) }.getOrNull() ?: continue
             val items = parseVideoList(html, baseUrl)
             if (items.isNotEmpty()) return items
         }
@@ -72,7 +72,7 @@ class GenericHtmlClient(rawRoot: String) : VideoClient {
         ensureProbed()
         if (template == Template.UNKNOWN) return emptyList()
         val detailUrl = buildDetailUrl(videoId)
-        val html = runCatching { HttpUtil.fetchText(detailUrl, referer = baseUrl) }.getOrNull()
+        val html = runCatching { HttpUtil.fetchText(detailUrl, referer = baseUrl, useProxy = true) }.getOrNull()
             ?: return listOf("正片" to "$baseUrl/vodplay/$videoId-1-1.html")
         val episodes = parseEpisodes(html, baseUrl)
         return episodes.ifEmpty { listOf("正片" to "$baseUrl/vodplay/$videoId-1-1.html") }
@@ -82,7 +82,7 @@ class GenericHtmlClient(rawRoot: String) : VideoClient {
         ensureProbed()
         if (template == Template.UNKNOWN) return null
         val detailUrl = buildDetailUrl(videoId)
-        val html = runCatching { HttpUtil.fetchText(detailUrl, referer = baseUrl) }.getOrNull() ?: return null
+        val html = runCatching { HttpUtil.fetchText(detailUrl, referer = baseUrl, useProxy = true) }.getOrNull() ?: return null
         val title = extractDetailTitle(html, videoId)
         val desc = extractDetailDesc(html)
         val poster = extractDetailPoster(html, baseUrl)
@@ -96,7 +96,7 @@ class GenericHtmlClient(rawRoot: String) : VideoClient {
     override fun resolvePlayUrl(episodeUrl: String): PlayInfo {
         val absolute = absolutize(episodeUrl, baseUrl)
         if (isDirectMediaUrl(absolute)) return PlayInfo(quality = "默认", url = absolute)
-        val html = runCatching { HttpUtil.fetchText(absolute, referer = baseUrl) }
+        val html = runCatching { HttpUtil.fetchText(absolute, referer = baseUrl, useProxy = true) }
             .getOrElse { throw IOException("播放页请求失败：${it.message ?: it.javaClass.simpleName}", it) }
         val direct = extractM3u8FromPlayPage(html)
         if (!direct.isNullOrBlank()) {
@@ -335,7 +335,7 @@ class GenericHtmlClient(rawRoot: String) : VideoClient {
 
     private fun resolveMasterPlaylist(m3u8Url: String): String? {
         return runCatching {
-            val content = HttpUtil.fetchText(m3u8Url, referer = baseUrl)
+            val content = HttpUtil.fetchText(m3u8Url, referer = baseUrl, useProxy = true)
             if (!content.contains("#EXT-X-STREAM-INF")) return@runCatching null
             val sub = content.lineSequence().map { it.trim() }.firstOrNull { it.isNotBlank() && !it.startsWith("#") } ?: return@runCatching null
             resolveUrlAgainst(m3u8Url, sub)

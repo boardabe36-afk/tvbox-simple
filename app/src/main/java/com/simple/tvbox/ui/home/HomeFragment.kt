@@ -49,6 +49,7 @@ import kotlinx.coroutines.withContext
 class HomeFragment : BrowseSupportFragment() {
 
     private val rowsAdapter = ArrayObjectAdapter(ListRowPresenter())
+    @Volatile private var isLoading = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -118,10 +119,16 @@ class HomeFragment : BrowseSupportFragment() {
     }
 
     private fun loadHome() {
+        if (isLoading) {
+            android.util.Log.i("HomeFragment", "loadHome: already loading, skip")
+            return
+        }
+        isLoading = true
         rowsAdapter.clear()
         lifecycleScope.launch {
             try {
                 val sources = TvBoxApp.get().sourceRepository.getAllSources()
+            android.util.Log.i("HomeFragment", "loadHome: sources=${sources.size}, thread=${Thread.currentThread().name}")
                 // 快捷入口不依赖视频源
                 renderQuickEntryRow()
                 if (sources.isEmpty()) {
@@ -158,6 +165,8 @@ class HomeFragment : BrowseSupportFragment() {
                     renderQuickEntryRow()
                     renderLoadFailedHint(emptyList())
                 }
+            } finally {
+                isLoading = false
             }
         }
     }
@@ -166,6 +175,7 @@ class HomeFragment : BrowseSupportFragment() {
      * 兑底行：当源加载失败时，显示"已配置 X 个源，加载失败，点击重试"
      */
     private fun renderLoadFailedHint(sources: List<com.simple.tvbox.model.Source>) {
+        android.util.Log.i("HomeFragment", "renderLoadFailedHint called, sources=${sources.size}")
         val header = HeaderItem(999L, "视频源加载失败")
         val rowAdapter = ArrayObjectAdapter(ActionPresenter())
         rowAdapter.add(ActionItem(id = 9991, title = "重试加载", subTitle = "重新连接已配置的源") {
@@ -550,6 +560,7 @@ class HomeFragment : BrowseSupportFragment() {
      * 行 3+：每个站点的分类（异步加载）
      */
     private fun renderSiteCategoryRows(sources: List<Source>) {
+        android.util.Log.i("HomeFragment", "renderSiteCategoryRows: sources=${sources.size}")
         sources.forEachIndexed { idx, src ->
             val isHtml = src.kind == Source.Kind.HTML
             val siteKey = if (isHtml) TvBoxApp.get().sourceRepository.htmlSiteKey(src.url) else src.url
@@ -573,6 +584,7 @@ class HomeFragment : BrowseSupportFragment() {
      * v1.0.9 新增：避免以前异常被静默吞掉、用户看不到任何反馈的问题
      */
     private fun addLoadFailedSiteRow(rowIndex: Long, headerTitle: String, errorMessage: String) {
+        android.util.Log.i("HomeFragment", "addLoadFailedSiteRow: headerTitle=$headerTitle, error=$errorMessage")
         if (!isAdded) return
         val header = HeaderItem(rowIndex, "$headerTitle · 加载失败")
         val rowAdapter = ArrayObjectAdapter(ActionPresenter())
@@ -602,6 +614,7 @@ class HomeFragment : BrowseSupportFragment() {
      * 添加某个站点的分类行（异步拉分类）
      */
     private fun addCategoryRowForSite(rowIndex: Long, headerTitle: String, siteKey: String, api: String) {
+        android.util.Log.i("HomeFragment", "addCategoryRowForSite: headerTitle=$headerTitle, siteKey=$siteKey, api=$api")
         val client = VideoClientFactory.create(
             SpiderSite(
                 key = siteKey,

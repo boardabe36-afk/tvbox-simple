@@ -47,6 +47,22 @@ object HttpUtil {
         .build()
 
     /**
+     * 允许走系统代理的 Client（用于 HTML 视频源抓取）。
+     *
+     * 为什么需要这个：
+     * - [client] 强制 NO_PROXY，避免豆瓣/OTA 走到不可达的 7897 端口
+     * - 但 HTML 视频源（如 icaiqi.com）在海外，国内电视直连可能超时
+     * - 如果用户电视/盒子设置了系统代理（如 Clash/SS），HTML 源应该走代理
+     * - 豆瓣/OTA 等国内服务仍用 [client]（NO_PROXY），不受影响
+     */
+    val proxyEnabledClient: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .writeTimeout(20, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .build()
+
+    /**
      * 抓取文本。
      *
      * 解码规则（按顺序）：
@@ -58,9 +74,10 @@ object HttpUtil {
      * - 国内 PHP 模板影视站（maccms 衍生 canghai / stui / 默认）默认输出 GBK
      * - 用 UTF-8 解 GBK 字节流会得到乱码，导致模板识别正则全部失效
      */
-    fun fetchText(url: String, referer: String? = null, charset: String? = null): String {
+    fun fetchText(url: String, referer: String? = null, charset: String? = null, useProxy: Boolean = false): String {
         val req = buildRequest(url, referer, UserAgentPreference.AUTO)
-        client.newCall(req).execute().use { resp ->
+        val httpClient = if (useProxy) proxyEnabledClient else client
+        httpClient.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) {
                 throw IllegalStateException("HTTP ${resp.code} for $url")
             }
@@ -91,9 +108,10 @@ object HttpUtil {
     /**
      * 抓取字节流（用于 m3u8 子文件、ts 分片、Referer 跟随等场景）。
      */
-    fun fetchBytes(url: String, referer: String? = null): ByteArray {
+    fun fetchBytes(url: String, referer: String? = null, useProxy: Boolean = false): ByteArray {
         val req = buildRequest(url, referer, UserAgentPreference.AUTO)
-        client.newCall(req).execute().use { resp ->
+        val httpClient = if (useProxy) proxyEnabledClient else client
+        httpClient.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) {
                 throw IllegalStateException("HTTP ${resp.code} for $url")
             }
