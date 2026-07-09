@@ -127,10 +127,16 @@ class OtaUpdater(
     /**
      * "已是最新" dialog
      */
-    private fun showNoUpdateDialog(remoteVersion: String, currentCode: Int) {
+    private fun showNoUpdateDialog(remoteVersionName: String, currentCode: Int) {
+        val sameName = remoteVersionName == currentVersionName()
+        val msg = if (sameName) {
+            "当前 v${currentVersionName()} (code $currentCode) 已是最新版本"
+        } else {
+            "当前 v${currentVersionName()} (code $currentCode)\n服务器最新: v$remoteVersionName"
+        }
         AlertDialog.Builder(activity)
             .setTitle("已是最新版本")
-            .setMessage("当前 v${currentVersionName()} (code $currentCode)\n服务器最新: v$remoteVersion")
+            .setMessage(msg)
             .setPositiveButton("好的", null)
             .show()
     }

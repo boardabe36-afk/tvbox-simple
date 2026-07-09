@@ -41,7 +41,21 @@ object OtaService {
      * 历史踩坑：证书 CN/SAN 是 www.1x1jt2.cn，所以 URL 必须带 www；
      * 用 1x1jt2.cn 不带 www 会报 SSLPeerUnverifiedException。
      */
-    const val OTA_URL = "https://www.1x1jt2.cn/app/ota-tvbox.json"
+    const val GITHUB_REPO = "boardabe36-afk/tvbox-simple"
+
+    /**
+     * GitHub Releases API：直连查询 latest release。
+     * 由 `gh release create` 触发，不依赖自家服务器。
+     */
+    const val GITHUB_LATEST_URL = "https://api.github.com/repos/$GITHUB_REPO/releases/latest"
+
+    /**
+     * APK 命名约定：tvbox-simple-v{versionName}-release.apk
+     */
+    private fun apkNameFromTag(tag: String, assetName: String?): String {
+        // 优先用 GitHub asset 真实名字
+        return assetName ?: tag
+    }
 
     /** APK 下载保存目录（在 app 私有 cache 目录，无需权限） */
     private fun apkDir(ctx: Context): File {
@@ -73,10 +87,10 @@ object OtaService {
      */
     suspend fun fetchUpdateInfo(): UpdateInfo = withContext(Dispatchers.IO) {
         try {
-            android.util.Log.i(TAG, "fetching ota: $OTA_URL")
-            val text = HttpUtil.fetchText(OTA_URL)
+            android.util.Log.i(TAG, "fetching latest release from GitHub: $GITHUB_LATEST_URL")
+            val text = HttpUtil.fetchText(GITHUB_LATEST_URL)
             android.util.Log.i(TAG, "got ${text.length} chars")
-            val info = parse(text)
+            val info = parseGithubRelease(text)
             android.util.Log.i(TAG, "parsed: v${info.versionName} code=${info.versionCode}")
             info
         } catch (t: Throwable) {
@@ -86,25 +100,90 @@ object OtaService {
     }
 
     /**
-     * 解析 OTA JSON。
+     * 解析 GitHub Releases API 的 latest release JSON。
+     *
+     * 期望字段：
+     *   tag_name:          "v1.0.13"
+     *   name:              "v1.0.13 - 搜索精准匹配"
+     *   body:              release notes (Markdown)
+     *   published_at:      "2026-07-09T14:11:00Z"
+     *   assets[]:          { name, browser_download_url, size, ... }
+     *   assets[0].name:    "tvbox-simple-v1.0.13.apk"
      */
-    private fun parse(text: String): UpdateInfo {
-        val obj = JSONObject(text)
-        val changelogArr = obj.optJSONArray("changelog")
-        val changelog = if (changelogArr != null) {
-            (0 until changelogArr.length()).map { changelogArr.optString(it) }
-        } else emptyList()
+    private fun parseGithubRelease(text: String): UpdateInfo {
+        val obj = org.json.JSONObject(text)
+        val tagName = obj.optString("tag_name", "")
+        if (tagName.isBlank()) throw IOException("GitHub 最新 release 没有 tag_name")
+        // 从 tag_name (如 "v1.0.13") 推断 versionName 和 versionCode
+        // 约定：tag = "vX.Y.Z" → versionName = "X.Y.Z"，versionCode 用 parsed manifest 外的版本位
+        // versionCode 没法从 tag 直接得到，先用 X*10000+Y*100+Z 启发式 + 找 latest 之前的
+        val body = obj.optString("body", "")
+        val versionName = tagName.removePrefix("v").trim()
+        val versionCode = parseVersionCodeFromBody(body, tagName)
+
+        // 找 APK asset
+        val assetsArr = obj.optJSONArray("assets")
+        var apkUrl = ""
+        var apkSize = 0L
+        var sha256 = ""
+        if (assetsArr != null) {
+            for (i in 0 until assetsArr.length()) {
+                val a = assetsArr.optJSONObject(i) ?: continue
+                val name = a.optString("name", "")
+                if (name.endsWith(".apk")) {
+                    apkUrl = a.optString("browser_download_url", "")
+                    apkSize = a.optLong("size", 0)
+                    break
+                }
+            }
+        }
+
+        // body 是 Markdown，取首段作为 changelog（body 已在前面定义）
+        val changelog = body.lines()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && !it.startsWith("#") }
+            .take(15)
+
         return UpdateInfo(
-            versionName = obj.optString("versionName", ""),
-            versionCode = obj.optInt("versionCode", 0),
-            apkUrl = obj.optString("apkUrl", ""),
-            apkSize = obj.optLong("apkSize", 0),
-            sha256 = obj.optString("sha256", "").lowercase(),
+            versionName = versionName,
+            versionCode = versionCode,
+            apkUrl = apkUrl,
+            apkSize = apkSize,
+            sha256 = sha256,
             changelog = changelog,
-            forceUpdate = obj.optBoolean("forceUpdate", false),
-            releaseNotes = obj.optStringOrNull("releaseNotes"),
-            releaseDate = obj.optStringOrNull("releaseDate")
+            forceUpdate = false,
+            releaseNotes = body.ifBlank { null },
+            releaseDate = obj.optStringOrNull("published_at")
         )
+    }
+
+    /**
+     * 从 release body (release notes) 里解析 "versionCode: N" 行。
+     *
+     * 为什么不用 tag 启发式算 X*10000+Y*100+Z：
+     * - 那会得出一个跟实际 Gradle versionCode 不一致的值（如 v1.0.13 算 10013）
+     * - 会导致"显示有更新但实际是同一版"的 bug
+     *
+     * release notes 由 `gh release create --notes ...` 写入，约定包含 "versionCode: N" 行。
+     */
+    private fun parseVersionCodeFromBody(body: String, tag: String): Int {
+        // 优先：从 body 里读 "versionCode: N"
+        for (line in body.lines()) {
+            val m = Regex("(?i)versionCode\\s*[:=]\\s*(\\d+)").find(line)
+            if (m != null) {
+                return m.groupValues[1].toIntOrNull() ?: 0
+            }
+        }
+        // fallback 1: 看看 body 里有没有 "code N" 这样的描述
+        for (line in body.lines()) {
+            val m = Regex("(?i)code\\s*(\\d+)").find(line)
+            if (m != null) {
+                return m.groupValues[1].toIntOrNull() ?: 0
+            }
+        }
+        // fallback 2: tag 启发式（如 v1.0.13 → 14 但实际要是 13，只警告不强制升级）
+        android.util.Log.w(TAG, "Could not parse versionCode from release body for $tag - skipping update check")
+        return -1
     }
 
     private fun JSONObject.optStringOrNull(key: String): String? {
