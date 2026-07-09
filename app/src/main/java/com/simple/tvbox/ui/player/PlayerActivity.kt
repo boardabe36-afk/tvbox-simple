@@ -29,8 +29,10 @@ import com.simple.tvbox.model.Source
 import com.simple.tvbox.model.WatchHistoryItem
 import com.simple.tvbox.source.VideoClientFactory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 
 /**
  * 视频播放页。
@@ -43,6 +45,7 @@ import kotlinx.coroutines.withContext
  * - 错误友好显示：失败时显示错误覆盖层，提供"重试/返回"按钮
  * - 偶发 thisUrl 解析失败时（视频源临时挂掉），点重试能重抓
  * - 播放时自动保存观看历史，下次打开同一集自动断点续看
+ * - **自动播放下一集**：播放结束(STATE_ENDED)时自动切到下一集
  */
 class PlayerActivity : FragmentActivity() {
 
@@ -55,17 +58,25 @@ class PlayerActivity : FragmentActivity() {
     private lateinit var errorDetail: TextView
     private lateinit var retryBtn: Button
     private lateinit var closeBtn: Button
+    private lateinit var nextBtn: Button
+    private lateinit var autoPlayToggle: Button
 
     private var title: String = ""
     private var subtitle: String = ""
-    private var episodeUrl: String = ""      // 原始剧集 URL（如 /movie/.../...）
-    private var siteKey: String = ""         // 站点 key
-    private var sourceUrl: String = ""       // 源 URL（用于反查 site）
-    private var videoId: String = ""         // 视频 ID（用于历史入口回到详情）
-    private var currentResolvedUrl: String = ""  // 已经 resolve 过的 m3u8 缓存
+    private var episodeUrl: String = ""
+    private var siteKey: String = ""
+    private var sourceUrl: String = ""
+    private var videoId: String = ""
+    private var currentResolvedUrl: String = ""
     private var pendingResumeMs: Long = 0L
     private var hasAppliedResume = false
     private var historyKey: String = ""
+
+    // Episode list for auto-play next
+    private var episodeList: List<Pair<String, String>> = emptyList()
+    private var currentEpisodeIndex: Int = -1
+    private var autoPlayNext: Boolean = true
+    private var isSwitchingEpisode: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -81,6 +92,24 @@ class PlayerActivity : FragmentActivity() {
         siteKey = intent.getStringExtra(EXTRA_SITE_KEY) ?: ""
         sourceUrl = intent.getStringExtra(EXTRA_SOURCE_URL) ?: ""
         videoId = intent.getStringExtra(EXTRA_VIDEO_ID) ?: ""
+
+        // Parse episode list from JSON
+        val episodeListJson = intent.getStringExtra(EXTRA_EPISODE_LIST) ?: ""
+        if (episodeListJson.isNotBlank()) {
+            try {
+                val arr = JSONArray(episodeListJson)
+                episodeList = (0 until arr.length()).map { i ->
+                    val obj = arr.getJSONObject(i)
+                    obj.getString("name") to obj.getString("url")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to parse episode list", e)
+            }
+        }
+        currentEpisodeIndex = intent.getIntExtra(EXTRA_EPISODE_INDEX, -1)
+        if (currentEpisodeIndex < 0 && episodeList.isNotEmpty()) {
+            currentEpisodeIndex = episodeList.indexOfFirst { it.second == episodeUrl }
+        }
 
         val historyRepo = TvBoxApp.get().watchHistoryRepository
         historyKey = historyRepo.buildKey(siteKey, sourceUrl, episodeUrl)
@@ -99,17 +128,74 @@ class PlayerActivity : FragmentActivity() {
         errorDetail = findViewById(R.id.player_error_detail)
         retryBtn = findViewById(R.id.player_retry_btn)
         closeBtn = findViewById(R.id.player_close_btn)
+        nextBtn = findViewById(R.id.player_next_btn)
+        autoPlayToggle = findViewById(R.id.player_autoplay_toggle)
 
         titleView.text = buildTitleText()
+        updateNextButton()
+        updateAutoPlayToggle()
 
         retryBtn.setOnClickListener { resolveAndPlay(forceRefresh = true) }
         closeBtn.setOnClickListener { finish() }
+        nextBtn.setOnClickListener { playNextEpisode() }
+        autoPlayToggle.setOnClickListener {
+            autoPlayNext = !autoPlayNext
+            updateAutoPlayToggle()
+            Toast.makeText(this,
+                if (autoPlayNext) "自动播放下一集已开启" else "自动播放下一集已关闭",
+                Toast.LENGTH_SHORT).show()
+        }
 
         resolveAndPlay(forceRefresh = false)
     }
 
+    private fun updateNextButton() {
+        val hasNext = currentEpisodeIndex >= 0 && currentEpisodeIndex < episodeList.size - 1
+        nextBtn.visibility = if (hasNext) View.VISIBLE else View.GONE
+        nextBtn.text = if (hasNext) "下一集: ${episodeList[currentEpisodeIndex + 1].first}" else ""
+    }
+
+    private fun updateAutoPlayToggle() {
+        autoPlayToggle.text = if (autoPlayNext) "自动连播: 开" else "自动连播: 关"
+    }
+
     /**
-     * 重新解析剧集 URL → m3u8 → 播放。
+     * Switch to the next episode.
+     */
+    private fun playNextEpisode() {
+        if (currentEpisodeIndex < 0 || currentEpisodeIndex >= episodeList.size - 1) return
+        if (isSwitchingEpisode) return
+        isSwitchingEpisode = true
+
+        saveProgressIfNeeded()
+
+        currentEpisodeIndex++
+        val (epName, epUrl) = episodeList[currentEpisodeIndex]
+        episodeUrl = epUrl
+        subtitle = epName
+        currentResolvedUrl = ""
+        pendingResumeMs = 0L
+        hasAppliedResume = false
+        historyKey = TvBoxApp.get().watchHistoryRepository.buildKey(siteKey, sourceUrl, episodeUrl)
+
+        // Check if we have saved progress for this episode
+        TvBoxApp.get().watchHistoryRepository.find(siteKey, sourceUrl, episodeUrl)?.let { history ->
+            if (history.positionMs > RESUME_THRESHOLD_MS) {
+                pendingResumeMs = history.positionMs
+            }
+            currentResolvedUrl = history.resolvedUrl.orEmpty()
+        }
+
+        titleView.text = buildTitleText()
+        updateNextButton()
+
+        Toast.makeText(this, "正在播放: $epName", Toast.LENGTH_SHORT).show()
+        resolveAndPlay(forceRefresh = false)
+        isSwitchingEpisode = false
+    }
+
+    /**
+     * 重新解析剧集 URL -> m3u8 -> 播放。
      * forceRefresh=true 时不读缓存，从头跑。
      */
     private fun resolveAndPlay(forceRefresh: Boolean) {
@@ -143,13 +229,11 @@ class PlayerActivity : FragmentActivity() {
     }
 
     private fun resolveUrl(): String {
-        // 找站点
         val app = TvBoxApp.get()
         val src = app.sourceRepository.getAllSources().firstOrNull { src ->
             src.url == sourceUrl || (src.kind == Source.Kind.HTML && sourceUrl == src.url)
         } ?: run {
             Log.w(TAG, "no source matched sourceUrl=$sourceUrl")
-            // 兜底：直接拿 episodeUrl 当 m3u8
             return episodeUrl
         }
         val site = app.sourceRepository.findSite(src.url, siteKey) ?: return episodeUrl
@@ -162,7 +246,6 @@ class PlayerActivity : FragmentActivity() {
     private fun initPlayer(url: String) {
         Log.i(TAG, "initPlayer url=$url")
 
-        // 推断 Referer：从 URL 里抽 host 的根域名
         val referer = inferReferer(url)
 
         val httpFactory = DefaultHttpDataSource.Factory()
@@ -202,6 +285,7 @@ class PlayerActivity : FragmentActivity() {
                 }
                 if (state == Player.STATE_ENDED) {
                     saveProgressIfNeeded()
+                    onEpisodeEnded()
                 }
             }
 
@@ -217,6 +301,22 @@ class PlayerActivity : FragmentActivity() {
         exo.prepare()
         exo.playWhenReady = true
         player = exo
+    }
+
+    /**
+     * Called when the current episode finishes playing (STATE_ENDED).
+     * Auto-plays the next episode if enabled.
+     */
+    private fun onEpisodeEnded() {
+        if (!autoPlayNext) return
+        if (currentEpisodeIndex < 0 || currentEpisodeIndex >= episodeList.size - 1) return
+
+        Log.i(TAG, "Episode ended, auto-playing next (index=${currentEpisodeIndex + 1})")
+        // Small delay for UX
+        lifecycleScope.launch {
+            delay(800)
+            playNextEpisode()
+        }
     }
 
     private fun applyResumeIfNeeded(exo: ExoPlayer) {
@@ -259,10 +359,13 @@ class PlayerActivity : FragmentActivity() {
 
     private fun buildTitleText(): String {
         val base = if (subtitle.isNotBlank()) "$title · $subtitle" else title
+        val epInfo = if (episodeList.isNotEmpty() && currentEpisodeIndex >= 0) {
+            " (${currentEpisodeIndex + 1}/${episodeList.size})"
+        } else ""
         return if (pendingResumeMs > RESUME_THRESHOLD_MS) {
-            "$base  ·  上次看到 ${formatTime(pendingResumeMs)}"
+            "$base$epInfo  ·  上次看到 ${formatTime(pendingResumeMs)}"
         } else {
-            base
+            "$base$epInfo"
         }
     }
 
@@ -285,10 +388,6 @@ class PlayerActivity : FragmentActivity() {
         errorDetail.text = detail
     }
 
-    /**
-     * 推断 Referer：从 m3u8 URL 抽主域名（不含 path/query）。
-     * 国内很多 CDN 要 Referer 是源站才能放。
-     */
     private fun inferReferer(url: String): String {
         return runCatching {
             val u = java.net.URL(url)
@@ -325,6 +424,14 @@ class PlayerActivity : FragmentActivity() {
             finish()
             return true
         }
+        // KEYCODE_DPAD_RIGHT long press: skip to next episode
+        if (keyCode == KeyEvent.KEYCODE_MEDIA_NEXT ||
+            (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && event?.repeatCount ?: 0 > 5)) {
+            if (currentEpisodeIndex >= 0 && currentEpisodeIndex < episodeList.size - 1) {
+                playNextEpisode()
+                return true
+            }
+        }
         return super.onKeyDown(keyCode, event)
     }
 
@@ -332,19 +439,17 @@ class PlayerActivity : FragmentActivity() {
         private const val TAG = "Player"
         private const val EXTRA_TITLE = "title"
         private const val EXTRA_SUBTITLE = "subtitle"
-        /** 原始剧集 URL（/movie/.../...），未 resolve */
         private const val EXTRA_EPISODE_URL = "episode_url"
-        private const val EXTRA_URL = "url"  // 兼容旧调用：直接传 m3u8
+        private const val EXTRA_URL = "url"
         private const val EXTRA_SITE_KEY = "site_key"
         private const val EXTRA_SOURCE_URL = "source_url"
         private const val EXTRA_VIDEO_ID = "video_id"
+        private const val EXTRA_EPISODE_LIST = "episode_list"
+        private const val EXTRA_EPISODE_INDEX = "episode_index"
 
         private const val RESUME_THRESHOLD_MS = 10_000L
         private const val END_IGNORE_THRESHOLD_MS = 30_000L
 
-        /**
-         * 旧版调用：直接传已 resolve 的 m3u8（向后兼容）
-         */
         fun intent(ctx: Context, title: String, subtitle: String?, url: String) =
             Intent(ctx, PlayerActivity::class.java).apply {
                 putExtra(EXTRA_TITLE, title)
@@ -352,10 +457,6 @@ class PlayerActivity : FragmentActivity() {
                 putExtra(EXTRA_URL, url)
             }
 
-        /**
-         * 新版调用：传剧集 URL + 站点信息，进入播放页后再 resolve。
-         * 这样 thisUrl 临时挂掉时点重试能再次请求。
-         */
         fun intent(
             ctx: Context, title: String, subtitle: String?,
             siteKey: String, sourceUrl: String, episodeUrl: String,
@@ -367,6 +468,34 @@ class PlayerActivity : FragmentActivity() {
             putExtra(EXTRA_SOURCE_URL, sourceUrl)
             putExtra(EXTRA_EPISODE_URL, episodeUrl)
             putExtra(EXTRA_VIDEO_ID, videoId ?: "")
+        }
+
+        /**
+         * New: pass full episode list for auto-play next.
+         */
+        fun intent(
+            ctx: Context, title: String, subtitle: String?,
+            siteKey: String, sourceUrl: String, episodeUrl: String,
+            videoId: String? = null,
+            episodeList: List<Pair<String, String>>,
+            episodeIndex: Int
+        ) = Intent(ctx, PlayerActivity::class.java).apply {
+            putExtra(EXTRA_TITLE, title)
+            putExtra(EXTRA_SUBTITLE, subtitle ?: "")
+            putExtra(EXTRA_SITE_KEY, siteKey)
+            putExtra(EXTRA_SOURCE_URL, sourceUrl)
+            putExtra(EXTRA_EPISODE_URL, episodeUrl)
+            putExtra(EXTRA_VIDEO_ID, videoId ?: "")
+            // Serialize episode list as JSON
+            val arr = JSONArray()
+            for ((name, url) in episodeList) {
+                val obj = org.json.JSONObject()
+                obj.put("name", name)
+                obj.put("url", url)
+                arr.put(obj)
+            }
+            putExtra(EXTRA_EPISODE_LIST, arr.toString())
+            putExtra(EXTRA_EPISODE_INDEX, episodeIndex)
         }
     }
 }

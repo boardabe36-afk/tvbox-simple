@@ -29,10 +29,10 @@ class DetailActivity : FragmentActivity() {
     private lateinit var titleView: TextView
     private lateinit var descView: TextView
     private lateinit var episodeContainer: GridLayout
-
     private var site: SpiderSite? = null
     private var videoId: String = ""
     private var episodes: List<Pair<String, String>> = emptyList()
+    private var title: String = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,7 +44,7 @@ class DetailActivity : FragmentActivity() {
 
         val siteKey = intent.getStringExtra(EXTRA_SITE_KEY) ?: return finish()
         videoId = intent.getStringExtra(EXTRA_VIDEO_ID) ?: return finish()
-        val title = intent.getStringExtra(EXTRA_TITLE) ?: ""
+        title = intent.getStringExtra(EXTRA_TITLE) ?: ""
         titleView.text = title
 
         site = findSite(siteKey)
@@ -89,7 +89,7 @@ class DetailActivity : FragmentActivity() {
 
     private fun renderEpisodes() {
         episodeContainer.removeAllViews()
-        episodes.forEach { (name, url) ->
+        episodes.forEachIndexed { index, (name, url) ->
             val tv = TextView(this).apply {
                 text = name
                 textSize = 16f
@@ -105,7 +105,7 @@ class DetailActivity : FragmentActivity() {
                     height = dpToPx(76)
                     setMargins(8, 8, 8, 8)
                 }
-                setOnClickListener { play(url, name) }
+                setOnClickListener { play(index) }
             }
             episodeContainer.addView(tv)
         }
@@ -119,18 +119,22 @@ class DetailActivity : FragmentActivity() {
         }
     }
 
-    private fun play(episodeUrl: String, episodeName: String) {
+    private fun play(index: Int) {
         val s = site ?: return
+        if (index < 0 || index >= episodes.size) return
+        val (name, url) = episodes[index]
         val srcUrl = findSourceUrlForSite(s.key)
         startActivity(
             PlayerActivity.intent(
                 this,
                 title = titleView.text.toString(),
-                subtitle = episodeName,
+                subtitle = name,
                 siteKey = s.key,
                 sourceUrl = srcUrl,
-                episodeUrl = episodeUrl,
-                videoId = videoId
+                episodeUrl = url,
+                videoId = videoId,
+                episodeList = episodes,
+                episodeIndex = index
             )
         )
     }
@@ -143,7 +147,7 @@ class DetailActivity : FragmentActivity() {
     private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
 
     companion object {
-        private const val EXTRA_SITE_KEY = "***"
+        private const val EXTRA_SITE_KEY = "site_key"
         private const val EXTRA_VIDEO_ID = "video_id"
         private const val EXTRA_TITLE = "title"
 
