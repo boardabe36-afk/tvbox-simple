@@ -203,10 +203,13 @@ class SourceRepository(private val context: Context) {
             lower.contains("canghai") || html.contains("stui-pannel") -> HtmlTemplate.MACCMS_CANGHAI
             // stui 模板
             lower.contains("stui") || html.contains("stui-vodlist") -> HtmlTemplate.MACCMS_STUI
+            // MX 模板（飞飞/苹果风格 MXPRO 等）：路径里带 /vodtype/、/vodplay/、/voddetail/
+            // 这个分支必须在 "maccms default" 之前，因为 MX 模板也叫 maccms
+            lower.contains("/vodtype/") || lower.contains("/vodplay/") || lower.contains("/voddetail/") -> HtmlTemplate.MACCMS_MX
             // 通用 maccms
-            lower.contains("/index.php/vod/") || lower.contains("mac.php") -> HtmlTemplate.MACCMS_DEFAULT
-            // 退路：能找到列表链接就当通用
-            html.contains("stui-vodlist") -> HtmlTemplate.GENERIC
+            lower.contains("/index.php/vod/") || lower.contains("mac.php") || lower.contains("maccms") -> HtmlTemplate.MACCMS_DEFAULT
+            // 退路：能找到 .html 链接就当通用
+            html.contains(".html") -> HtmlTemplate.GENERIC
             else -> HtmlTemplate.UNKNOWN
         }
     }
@@ -227,7 +230,7 @@ class SourceRepository(private val context: Context) {
             u.host.replace(".", "_")
         }.getOrDefault(raw.hashCode().toString())
 
-    private enum class HtmlTemplate { MACCMS_CANGHAI, MACCMS_STUI, MACCMS_DEFAULT, GENERIC, UNKNOWN }
+    private enum class HtmlTemplate { MACCMS_CANGHAI, MACCMS_STUI, MACCMS_MX, MACCMS_DEFAULT, GENERIC, UNKNOWN }
 
     companion object {
         private const val PREFS_NAME = "tvbox_simple_prefs"

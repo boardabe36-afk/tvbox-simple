@@ -176,7 +176,7 @@ class HomeFragment : BrowseSupportFragment() {
             rowAdapter.add(ActionItem(id = 9992, title = "已配置 ${sources.size} 个源（点重试）", subTitle = sources.joinToString(" · ") { it.name }) {})
         }
         rowAdapter.add(ActionItem(id = 9993, title = "去设置检查", subTitle = "查看源配置 / 重新添加") {
-            startActivity(Intent(requireContext(), com.simple.tvbox.ui.settings.SettingsActivity::class.java))
+            runCatching { startActivity(Intent(requireContext(), com.simple.tvbox.ui.settings.SettingsActivity::class.java)) }.onFailure { android.util.Log.e("HomeFragment", "open settings failed", it) }
         })
         rowsAdapter.add(ListRow(header, rowAdapter))
     }
@@ -188,7 +188,7 @@ class HomeFragment : BrowseSupportFragment() {
             title = "还没有视频源，先用“扫码设置”或手动设置添加",
             subTitle = "扫码设置支持手机输入网址或 JSON 配置链接，同步到电视"
         ) {
-            startActivity(Intent(requireContext(), SettingsActivity::class.java))
+            runCatching { startActivity(Intent(requireContext(), SettingsActivity::class.java)) }.onFailure { android.util.Log.e("HomeFragment", "open settings failed", it) }
         }
         val rowAdapter = ArrayObjectAdapter(ActionPresenter())
         rowAdapter.add(item)
@@ -220,7 +220,7 @@ class HomeFragment : BrowseSupportFragment() {
             startActivity(QrActivity.intent(requireContext(), QrActivity.MODE_SETTINGS))
         })
         rowAdapter.add(ActionItem(id = HEADER_QUICK * 100 + 7, title = getString(R.string.title_settings)) {
-            startActivity(Intent(requireContext(), SettingsActivity::class.java))
+            runCatching { startActivity(Intent(requireContext(), SettingsActivity::class.java)) }.onFailure { android.util.Log.e("HomeFragment", "open settings failed", it) }
         })
         rowAdapter.add(ActionItem(id = HEADER_QUICK * 100 + 8, title = getString(R.string.title_refresh)) {
             // 手动刷新：清空所有缓存后重新加载
@@ -555,42 +555,47 @@ class HomeFragment : BrowseSupportFragment() {
             val siteKey = if (isHtml) TvBoxApp.get().sourceRepository.htmlSiteKey(src.url) else src.url
             val siteKind = if (isHtml) "html://${src.url}" else src.url
 
-            // 对 HTML 源：站点就是它自己（无需展开），直接探测一次
-            // 对 JSON 源：需要展开成 SpiderSite 再 fetchHomeCategories
-            lifecycleScope.launch {
-                runCatching {
-                    val site: SpiderSite? = if (isHtml) {
-                        // HTML 源站点：包装为 SpiderSite
-                        withContext(Dispatchers.IO) {
-                            TvBoxApp.get().sourceRepository.testAndLoad(src)
-                        }
-                    } else {
-                        null // JSON 源等下面异步处理
-                    }
-                    if (site != null) {
-                        addCategoryRowForSite(
-                            rowIndex = HEADER_SITES + idx,
-                            headerTitle = site.name,
-                            siteKey = siteKey,
-                            api = siteKind
-                        )
-                    } else if (!isHtml) {
-                        // JSON 源：尝试加载第一个站点
-                        val allSites = withContext(Dispatchers.IO) {
-                            TvBoxApp.get().sourceRepository.loadAllSites()
-                        }
-                        allSites.firstOrNull { it.key == siteKey }?.let { s ->
-                            addCategoryRowForSite(
-                                rowIndex = HEADER_SITES + idx,
-                                headerTitle = s.name,
-                                siteKey = s.key,
-                                api = s.api
-                            )
-                        }
-                    }
-                }
-            }
+            // v1.0.9 重要修复：
+            // Leanback BrowseSupportFragment 在 loadHome 同步阶段之后不再重建 header 列表。
+            // 如果用 lifecycleScope.launch 异步 add row，row 虽然被 add 但 header 不会显示。
+            // 修复：同步 add 一个占位 row，fetchHomeCategories 异步填入卡片内容。
+            addCategoryRowForSite(
+                rowIndex = HEADER_SITES + idx,
+                headerTitle = src.name,
+                siteKey = siteKey,
+                api = siteKind
+            )
         }
+    }
+
+    /**
+     * 兜底行：某个源探测失败时显示"站点加载失败"提示
+     * v1.0.9 新增：避免以前异常被静默吞掉、用户看不到任何反馈的问题
+     */
+    private fun addLoadFailedSiteRow(rowIndex: Long, headerTitle: String, errorMessage: String) {
+        if (!isAdded) return
+        val header = HeaderItem(rowIndex, "$headerTitle · 加载失败")
+        val rowAdapter = ArrayObjectAdapter(ActionPresenter())
+        rowAdapter.add(ActionItem(
+            id = 9981,
+            title = "重试",
+            subTitle = "重新加载该源"
+        ) {
+            Toast.makeText(requireContext(), "重试中…", Toast.LENGTH_SHORT).show()
+            loadHome()
+        })
+        rowAdapter.add(ActionItem(
+            id = 9982,
+            title = "去设置检查",
+            subTitle = "查看/删除该源（错误：${errorMessage.take(40)}）"
+        ) {
+            runCatching {
+                startActivity(
+                    Intent(requireContext(), com.simple.tvbox.ui.settings.SettingsActivity::class.java)
+                )
+            }.onFailure { android.util.Log.e("HomeFragment", "open settings failed", it) }
+        })
+        rowsAdapter.add(ListRow(header, rowAdapter))
     }
 
     /**
@@ -648,6 +653,12 @@ class HomeFragment : BrowseSupportFragment() {
                         ))
                     }
                 }
+            }.onFailure { t ->
+                android.util.Log.e("HomeFragment", "addCategoryRowForSite fetchHomeCategories failed for " + siteKey, t)
+                if (!isAdded) return@onFailure
+                if (rowsAdapter.indexOf(row) < 0) return@onFailure
+                rowsAdapter.remove(row)
+                addLoadFailedSiteRow(rowIndex, headerTitle, t.message ?: t.javaClass.simpleName)
             }
         }
     }
