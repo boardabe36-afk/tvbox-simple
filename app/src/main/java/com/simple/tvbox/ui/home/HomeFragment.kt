@@ -586,6 +586,7 @@ class HomeFragment : BrowseSupportFragment() {
     private fun addLoadFailedSiteRow(rowIndex: Long, headerTitle: String, errorMessage: String) {
         android.util.Log.i("HomeFragment", "addLoadFailedSiteRow: headerTitle=$headerTitle, error=$errorMessage")
         if (!isAdded) return
+        android.widget.Toast.makeText(requireContext(), "$headerTitle 加载失败: $errorMessage", android.widget.Toast.LENGTH_LONG).show()
         val header = HeaderItem(rowIndex, "$headerTitle · 加载失败")
         val rowAdapter = ArrayObjectAdapter(ActionPresenter())
         rowAdapter.add(ActionItem(
