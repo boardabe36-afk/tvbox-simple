@@ -169,16 +169,16 @@ object OtaService {
     private fun parseVersionCodeFromBody(body: String, tag: String): Int {
         // 优先：从 body 里读 "versionCode: N"
         for (line in body.lines()) {
-            val m = Regex("(?i)versionCode\\s*[:=]\\s*(\\d+)").find(line)
-            if (m != null) {
-                return m.groupValues[1].toIntOrNull() ?: 0
+            val ms = Regex("(?i)versionCode\\s*[:=]\\s*(\\d+)").findAll(line).toList()
+            if (ms.isNotEmpty()) {
+                return ms.last().groupValues[1].toIntOrNull() ?: 0
             }
         }
         // fallback 1: 看看 body 里有没有 "code N" 这样的描述
         for (line in body.lines()) {
-            val m = Regex("(?i)code\\s*(\\d+)").find(line)
-            if (m != null) {
-                return m.groupValues[1].toIntOrNull() ?: 0
+            val ms = Regex("(?i)code\\s*(\\d+)").findAll(line).toList()
+            if (ms.isNotEmpty()) {
+                return ms.last().groupValues[1].toIntOrNull() ?: 0
             }
         }
         // fallback 2: tag 启发式（如 v1.0.13 → 14 但实际要是 13，只警告不强制升级）
