@@ -55,7 +55,8 @@ class OtaUpdater(
             try {
                 val info = OtaService.fetchUpdateInfo()
                 val currentCode = currentVersionCode()
-                if (info.isNewerThan(currentCode)) {
+                val currentName = currentVersionName()
+                if (info.isNewerThan(currentCode, currentName)) {
                     showUpdateDialog(info)
                 } else {
                     showNoUpdateDialog(info.versionName, currentCode)
@@ -85,7 +86,8 @@ class OtaUpdater(
             try {
                 val info = OtaService.fetchUpdateInfo()
                 val currentCode = currentVersionCode()
-                if (info.isNewerThan(currentCode)) {
+                val currentName = currentVersionName()
+                if (info.isNewerThan(currentCode, currentName)) {
                     startDownload(info)
                 } else {
                     statusText?.text = "已是最新版本 (v${info.versionName})"

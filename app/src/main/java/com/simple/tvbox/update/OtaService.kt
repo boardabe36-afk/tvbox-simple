@@ -78,8 +78,41 @@ object OtaService {
         val releaseNotes: String?,
         val releaseDate: String?
     ) {
-        /** 用户的当前 versionCode >= 服务端 versionCode 时 = 无更新 */
-        fun isNewerThan(currentVersionCode: Int): Boolean = versionCode > currentVersionCode
+        /**
+         * 判断服务端版本是否“新”于客户端当前 versionCode。
+         *
+         * 优先比 versionCode（精准）；如果 server versionCode 没解析出来
+         * (e.g. release body 忘了写 `versionCode: N` 返回了 -1），fallback
+         * 到 versionName semver 比对 (`v1.0.16` > `v1.0.15`) 。
+         */
+        fun isNewerThan(currentVersionCode: Int, currentVersionName: String? = null): Boolean {
+            // 1) versionCode 精准比较（首选）
+            if (versionCode > 0 && currentVersionCode > 0) {
+                return versionCode > currentVersionCode
+            }
+            // 2) server code 解析失败 (=-1) 且 client versionName 存在 → semver 比对
+            if (currentVersionName != null && versionName.isNotBlank()) {
+                return compareSemver(versionName, currentVersionName) > 0
+            }
+            // 3) 都没法比，安全判定为不升级
+            return false
+        }
+
+        /**
+         * Semver-like compare: `1.2.10` > `1.2.9` （逐位数字比较）
+         * @return 正数 a>b，0 相等，负数 a<b
+         */
+        private fun compareSemver(a: String, b: String): Int {
+            val pa = a.split(".").map { it.toIntOrNull() ?: 0 }
+            val pb = b.split(".").map { it.toIntOrNull() ?: 0 }
+            val len = maxOf(pa.size, pb.size)
+            for (i in 0 until len) {
+                val va = pa.getOrElse(i) { 0 }
+                val vb = pb.getOrElse(i) { 0 }
+                if (va != vb) return va - vb
+            }
+            return 0
+        }
     }
 
     /**
