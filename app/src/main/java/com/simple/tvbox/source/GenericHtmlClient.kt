@@ -60,11 +60,18 @@ class GenericHtmlClient(rawRoot: String) : VideoClient {
             "$baseUrl/search.php?wd=$encoded",
             "$baseUrl/index.php?m=vod-search&wd=$encoded",
         )
+        android.util.Log.i("GenericHtmlClient", "search site=$key keyword=$keyword template=$template")
         for (url in candidates) {
-            val html = runCatching { HttpUtil.fetchText(url, referer = baseUrl) }.getOrNull() ?: continue
+            val html = runCatching { HttpUtil.fetchText(url, referer = baseUrl) }.getOrNull()
+            if (html == null) {
+                android.util.Log.w("GenericHtmlClient", "search url failed: $url")
+                continue
+            }
             val items = parseVideoList(html, baseUrl)
+            android.util.Log.i("GenericHtmlClient", "search url=$url parsed=${items.size} items")
             if (items.isNotEmpty()) return items
         }
+        android.util.Log.w("GenericHtmlClient", "search returned 0 items for $keyword")
         return emptyList()
     }
 

@@ -17,7 +17,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 单个分类下的视频列表：网格展示，不再横向一排。
+ * 单个分类下的视频列表：网格展示。
+ *
+ * v1.0.19:
+ * - 顶栏标题包含分类 ID，便于诊断"所有分类显示同一列表"的源端 bug
+ * - 每次 fetchCategory 走 Log.i 输出 URL + 返回数量
+ * - 加载完成后 Toast 提示总结果数
  */
 class CategoryFragment : VerticalGridSupportFragment() {
 
@@ -31,7 +36,8 @@ class CategoryFragment : VerticalGridSupportFragment() {
         site = findSiteFromAnySource()
         categoryId = arguments?.getString(ARG_CATEGORY_ID)
         categoryName = arguments?.getString(ARG_CATEGORY_NAME) ?: "分类"
-        title = categoryName
+        // 标题带分类 ID，用户能一眼看到当前分类 ID 是否真不同
+        title = "$categoryName [${categoryId ?: "?"}]"
         gridPresenter = VerticalGridPresenter().apply {
             numberOfColumns = 4
             shadowEnabled = true
@@ -49,6 +55,16 @@ class CategoryFragment : VerticalGridSupportFragment() {
                     )
                 )
             }
+        }
+        // 顶栏搜索按钮点击 = 手动刷新（调试用）
+        setOnSearchClickedListener {
+            Toast.makeText(
+                requireContext(),
+                "手动刷新分类 [$categoryId] ${site?.key}",
+                Toast.LENGTH_SHORT
+            ).show()
+            android.util.Log.i("CategoryFragment", "Manual refresh for cid=$categoryId site=${site?.key}")
+            load()
         }
         load()
     }
@@ -70,6 +86,7 @@ class CategoryFragment : VerticalGridSupportFragment() {
             Toast.makeText(requireContext(), "无效的分类", Toast.LENGTH_LONG).show()
             return
         }
+        android.util.Log.i("CategoryFragment", "fetchCategory site=${s.key} cid=$cid api=${s.api}")
         val client = VideoClientFactory.create(s)
         lifecycleScope.launch {
             try {
@@ -77,8 +94,10 @@ class CategoryFragment : VerticalGridSupportFragment() {
                     if (!client.isSupported()) throw IllegalStateException("该站点类型暂不支持")
                     client.fetchCategory(cid, 1)
                 }
+                android.util.Log.i("CategoryFragment", "fetchCategory returned ${items.size} items for cid=$cid")
                 render(items)
             } catch (t: Throwable) {
+                android.util.Log.e("CategoryFragment", "fetchCategory FAILED for cid=$cid", t)
                 Toast.makeText(requireContext(), "加载失败：${t.message ?: t.javaClass.simpleName}", Toast.LENGTH_LONG).show()
             }
         }
@@ -97,10 +116,17 @@ class CategoryFragment : VerticalGridSupportFragment() {
                 )
             )
         }
+        if (items.isNotEmpty()) {
+            Toast.makeText(
+                requireContext(),
+                "${categoryName} · 共 ${items.size} 个结果",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
     }
 
     companion object {
-        private const val ARG_SITE_KEY = "***"
+        private const val ARG_SITE_KEY = "site_key"
         private const val ARG_CATEGORY_ID = "category_id"
         private const val ARG_CATEGORY_NAME = "category_name"
 

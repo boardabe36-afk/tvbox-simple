@@ -166,9 +166,11 @@ class SearchActivity : FragmentActivity() {
 
                 val ranked: List<SearchResult> = withContext(Dispatchers.IO) {
                     val supportedSites = sites.filter { VideoClientFactory.create(it).isSupported() }
+                    android.util.Log.i("SearchActivity", "搜索 \"$keyword\" across ${sites.size} sources, ${supportedSites.size} supported")
                     supportedSites.map { site ->
                         async {
-                            runCatching {
+                            val perSiteStart = System.currentTimeMillis()
+                            val results = runCatching {
                                 val client = VideoClientFactory.create(site)
                                 if (client.isSupported()) {
                                     val primaryResults = client.search(keyword, 1)
@@ -191,12 +193,21 @@ class SearchActivity : FragmentActivity() {
                                             }
                                         }.getOrDefault(emptyList())
                                     } else emptyList()
-                                    (primaryResults + secondaryResults)
+                                    primaryResults + secondaryResults
                                 } else emptyList()
-                            }.getOrDefault(emptyList())
+                            }.getOrElse {
+                                android.util.Log.w("SearchActivity", "source ${site.key} failed: ${it.message}")
+                                emptyList()
+                            }
+                            val elapsed = System.currentTimeMillis() - perSiteStart
+                            android.util.Log.i("SearchActivity", "source ${site.key} returned ${results.size} items in ${elapsed}ms")
+                            results
                         }
                     }.awaitAll()
                         .flatten()
+                        .also { all ->
+                            android.util.Log.i("SearchActivity", "合并 ${all.size} 条结果 (未去重)")
+                        }
                         .groupBy { it.site.key + "::" + it.item.id }
                         .map { (_, group) -> group.maxByOrNull { it.score }!! }
                         .filter { it.score > -1000 }
@@ -206,6 +217,10 @@ class SearchActivity : FragmentActivity() {
                                 .thenBy { it.item.title.length }
                                 .thenBy { it.site.name }
                         )
+                        .also { final ->
+                            val perSite = final.groupBy { it.site.key }.mapValues { it.value.size }
+                            android.util.Log.i("SearchActivity", "最终结果 ${final.size} 条, 分布: $perSite")
+                        }
                 }
 
                 progress.visibility = View.GONE
@@ -224,8 +239,9 @@ class SearchActivity : FragmentActivity() {
 
     private fun renderResults(keyword: String, results: List<SearchResult>) {
         resultsContainer.removeAllViews()
+        val siteCount = results.map { it.site.key }.distinct().size
         val header = TextView(this).apply {
-            text = "${results.size} 条结果 · 已按“$keyword”的匹配精度排序"
+            text = "${results.size} 条结果 · 跨 $siteCount 个源 · 已按“$keyword”的匹配精度排序"
             textSize = 18f
             setTextColor(Color.LTGRAY)
             setPadding(0, 8, 0, 16)
@@ -300,13 +316,15 @@ class SearchActivity : FragmentActivity() {
         return k.trim().replace(Regex("\\s+"), " ")
     }
 
-    private fun dedupBySiteTop3(results: List<SearchResult>): List<SearchResult> {
+    private fun dedupBySiteTop3(results: List<SearchResult>): List<SearchResult> = dedupBySiteTopN(results, 8)
+
+    private fun dedupBySiteTopN(results: List<SearchResult>, topN: Int): List<SearchResult> {
         val bySite = results.groupBy { it.site.key }
         return bySite.flatMap { (_, list) ->
             list.sortedByDescending { it.score }
                 .mapIndexed { idx, r ->
-                    if (idx < 3) r
-                    else r.copy(score = r.score - (idx - 2) * 1500)
+                    if (idx < topN) r
+                    else r.copy(score = r.score - (idx - (topN - 1)) * 800)
                 }
         }
     }

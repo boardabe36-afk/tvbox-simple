@@ -51,10 +51,12 @@ class SpiderClient(private val site: SpiderSite) : VideoClient {
 
     override fun search(keyword: String, page: Int): List<VideoItem> {
         if (!isSupported()) return emptyList()
-        val body = call(
-            buildUrl(ac = "list", extra = mapOf("wd" to keyword, "pg" to page.toString()))
-        )
-        return parseVideoList(body)
+        val url = buildUrl(ac = "list", extra = mapOf("wd" to keyword, "pg" to page.toString()))
+        android.util.Log.i("SpiderClient", "search site=${site.key} keyword=$keyword url=$url")
+        val body = call(url)
+        val items = parseVideoList(body)
+        android.util.Log.i("SpiderClient", "search site=${site.key} returned ${items.size} items")
+        return items
     }
 
     override fun fetchEpisodes(videoId: String): List<Pair<String, String>> {
