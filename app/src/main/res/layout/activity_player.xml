@@ -32,6 +32,34 @@
             android:textSize="20sp" />
 
         <Button
+            android:id="@+id/player_quality_btn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="#80000000"
+            android:paddingStart="16dp"
+            android:paddingTop="12dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="12dp"
+            android:text="@string/player_quality"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:layout_marginStart="8dp" />
+
+        <Button
+            android:id="@+id/player_audio_btn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="#80000000"
+            android:paddingStart="16dp"
+            android:paddingTop="12dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="12dp"
+            android:text="@string/player_audio_mode"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:layout_marginStart="8dp" />
+
+        <Button
             android:id="@+id/player_autoplay_toggle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -60,6 +88,86 @@
             android:layout_marginStart="8dp"
             android:visibility="gone" />
     </LinearLayout>
+
+    <!-- Bottom bar: episode list (shown when user toggles) -->
+    <LinearLayout
+        android:id="@+id/player_episodes_panel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginBottom="120dp"
+        android:orientation="vertical"
+        android:background="#CC000000"
+        android:padding="16dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/player_episodes_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/player_episodes"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="12dp" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/player_episodes_list"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="64dp"
+            android:maxHeight="220dp"
+            android:clipToPadding="false"
+            android:scrollbars="none" />
+    </LinearLayout>
+
+    <!-- Quality / Audio mode dialog container -->
+    <LinearLayout
+        android:id="@+id/player_options_panel"
+        android:layout_width="420dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="32dp"
+        android:orientation="vertical"
+        android:background="#EE0F1014"
+        android:padding="20dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/player_options_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/player_quality"
+            android:textColor="#FFFFFF"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="12dp" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/player_options_list"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="80dp"
+            android:maxHeight="420dp"
+            android:clipToPadding="false"
+            android:scrollbars="none" />
+    </LinearLayout>
+
+    <!-- Episode toggle button (bottom-right corner) -->
+    <Button
+        android:id="@+id/player_episodes_toggle_btn"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="32dp"
+        android:background="#80000000"
+        android:paddingStart="24dp"
+        android:paddingTop="14dp"
+        android:paddingEnd="24dp"
+        android:paddingBottom="14dp"
+        android:text="@string/player_episodes"
+        android:textColor="#FFFFFF"
+        android:textSize="16sp" />
 
     <!-- Buffering spinner -->
     <ProgressBar

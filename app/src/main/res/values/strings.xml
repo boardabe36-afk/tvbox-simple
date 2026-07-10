@@ -36,4 +36,24 @@
     <string name="retry">重试</string>
     <string name="play">播放</string>
     <string name="back">返回</string>
+
+    <!-- 播放器 (v1.0.16) -->
+    <string name="player_quality">画质</string>
+    <string name="player_audio_mode">音效</string>
+    <string name="player_episodes">选集</string>
+    <string name="player_quality_auto">自动</string>
+    <string name="player_quality_360">流畅 360P</string>
+    <string name="player_quality_480">标清 480P</string>
+    <string name="player_quality_720">高清 720P</string>
+    <string name="player_quality_1080">超清 1080P</string>
+    <string name="player_quality_4k">蓝光 4K</string>
+    <string name="player_audio_standard">标准</string>
+    <string name="player_audio_music">音乐</string>
+    <string name="player_audio_movie">影院</string>
+    <string name="player_audio_dolby">杜比</string>
+    <string name="player_audio_voice">人声增强</string>
+    <string name="player_episode_empty">无选集信息</string>
+    <string name="player_episode_loading">选集加载中…</string>
+    <string name="player_quality_applied">已切换画质: %1$s</string>
+    <string name="player_audio_applied">已切换音效: %1$s</string>
 </resources>

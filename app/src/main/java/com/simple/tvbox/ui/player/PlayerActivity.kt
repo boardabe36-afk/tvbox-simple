@@ -2,11 +2,16 @@ package com.simple.tvbox.ui.player
 
 import android.content.Context
 import android.content.Intent
+import android.media.audiofx.Equalizer
+import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import android.util.Pair as AndroidPair
 import android.view.KeyEvent
+import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -14,15 +19,20 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.ui.PlayerView
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.simple.tvbox.R
 import com.simple.tvbox.TvBoxApp
 import com.simple.tvbox.model.Source
@@ -35,7 +45,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 
 /**
- * 视频播放页。
+ * 视频播放页 (v1.0.16)。
  *
  * 用 Media3/ExoPlayer 播 m3u8/mp4 直链。
  *
@@ -46,6 +56,9 @@ import org.json.JSONArray
  * - 偶发 thisUrl 解析失败时（视频源临时挂掉），点重试能重抓
  * - 播放时自动保存观看历史，下次打开同一集自动断点续看
  * - **自动播放下一集**：播放结束(STATE_ENDED)时自动切到下一集
+ * - **画质选择** (v1.0.16): ExoPlayer TrackSelector 切换视频 track 高度
+ * - **音效模式** (v1.0.16): LoudnessEnhancer + Equalizer preset (标准/音乐/影院/杜比/人声)
+ * - **选集面板** (v1.0.16): 进度条下方横滑剧集,一键跳播
  */
 class PlayerActivity : FragmentActivity() {
 
@@ -60,6 +73,15 @@ class PlayerActivity : FragmentActivity() {
     private lateinit var closeBtn: Button
     private lateinit var nextBtn: Button
     private lateinit var autoPlayToggle: Button
+    private lateinit var qualityBtn: Button
+    private lateinit var audioBtn: Button
+    private lateinit var episodesToggleBtn: Button
+    private lateinit var episodesPanel: LinearLayout
+    private lateinit var episodesList: RecyclerView
+    private lateinit var episodesTitle: TextView
+    private lateinit var optionsPanel: LinearLayout
+    private lateinit var optionsTitle: TextView
+    private lateinit var optionsList: RecyclerView
 
     private var title: String = ""
     private var subtitle: String = ""
@@ -77,6 +99,32 @@ class PlayerActivity : FragmentActivity() {
     private var currentEpisodeIndex: Int = -1
     private var autoPlayNext: Boolean = true
     private var isSwitchingEpisode: Boolean = false
+
+    // Audio session effects (v1.0.16)
+    private var loudnessEnhancer: LoudnessEnhancer? = null
+    private var equalizer: Equalizer? = null
+    private var audioSessionId: Int = C.AUDIO_SESSION_ID_UNSET
+
+    // Quality selection (v1.0.16)
+    private enum class QualityTier(val labelResId: Int, val maxHeight: Int) {
+        AUTO(R.string.player_quality_auto, Int.MAX_VALUE),
+        SD_360(R.string.player_quality_360, 360),
+        SD_480(R.string.player_quality_480, 480),
+        HD_720(R.string.player_quality_720, 720),
+        FHD_1080(R.string.player_quality_1080, 1080),
+        UHD_4K(R.string.player_quality_4k, 2160),
+    }
+    private var selectedQuality: QualityTier = QualityTier.AUTO
+
+    // Audio mode selection (v1.0.16)
+    private enum class AudioMode(val labelResId: Int) {
+        STANDARD(R.string.player_audio_standard),
+        MUSIC(R.string.player_audio_music),
+        MOVIE(R.string.player_audio_movie),
+        DOLBY(R.string.player_audio_dolby),
+        VOICE(R.string.player_audio_voice),
+    }
+    private var selectedAudioMode: AudioMode = AudioMode.STANDARD
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -130,6 +178,15 @@ class PlayerActivity : FragmentActivity() {
         closeBtn = findViewById(R.id.player_close_btn)
         nextBtn = findViewById(R.id.player_next_btn)
         autoPlayToggle = findViewById(R.id.player_autoplay_toggle)
+        qualityBtn = findViewById(R.id.player_quality_btn)
+        audioBtn = findViewById(R.id.player_audio_btn)
+        episodesToggleBtn = findViewById(R.id.player_episodes_toggle_btn)
+        episodesPanel = findViewById(R.id.player_episodes_panel)
+        episodesList = findViewById(R.id.player_episodes_list)
+        episodesTitle = findViewById(R.id.player_episodes_title)
+        optionsPanel = findViewById(R.id.player_options_panel)
+        optionsTitle = findViewById(R.id.player_options_title)
+        optionsList = findViewById(R.id.player_options_list)
 
         titleView.text = buildTitleText()
         updateNextButton()
@@ -145,8 +202,97 @@ class PlayerActivity : FragmentActivity() {
                 if (autoPlayNext) "自动播放下一集已开启" else "自动播放下一集已关闭",
                 Toast.LENGTH_SHORT).show()
         }
+        qualityBtn.setOnClickListener { showQualityDialog() }
+        audioBtn.setOnClickListener { showAudioDialog() }
+        episodesToggleBtn.setOnClickListener { toggleEpisodesPanel() }
+
+        // Setup episodes list
+        setupEpisodesList()
+        updateEpisodesToggleButton()
 
         resolveAndPlay(forceRefresh = false)
+    }
+
+    private fun setupEpisodesList() {
+        episodesList.layoutManager = LinearLayoutManager(this, RecyclerView.HORIZONTAL, false)
+        val adapter = EpisodeAdapter(episodeList, currentEpisodeIndex) { index ->
+            jumpToEpisode(index)
+        }
+        episodesList.adapter = adapter
+        // Auto scroll to current episode
+        if (currentEpisodeIndex >= 0) {
+            episodesList.post {
+                episodesList.scrollToPosition(currentEpisodeIndex.coerceAtLeast(0))
+            }
+        }
+    }
+
+    private fun updateEpisodesToggleButton() {
+        episodesToggleBtn.visibility = if (episodeList.isNotEmpty()) View.VISIBLE else View.GONE
+    }
+
+    private fun toggleEpisodesPanel() {
+        if (episodeList.isEmpty()) {
+            Toast.makeText(this, R.string.player_episode_empty, Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (episodesPanel.visibility == View.VISIBLE) {
+            episodesPanel.visibility = View.GONE
+            optionsPanel.visibility = View.GONE
+        } else {
+            episodesPanel.visibility = View.VISIBLE
+            optionsPanel.visibility = View.GONE
+            episodesTitle.text = getString(R.string.player_episodes) + " (${episodeList.size}集)"
+            // Scroll to current
+            (episodesList.adapter as? EpisodeAdapter)?.let { adapter ->
+                adapter.setSelectedIndex(currentEpisodeIndex)
+                episodesList.post {
+                    episodesList.scrollToPosition(currentEpisodeIndex.coerceAtLeast(0))
+                }
+            }
+        }
+    }
+
+    /**
+     * Jump to a specific episode index.
+     */
+    private fun jumpToEpisode(index: Int) {
+        if (index < 0 || index >= episodeList.size) return
+        if (index == currentEpisodeIndex) {
+            episodesPanel.visibility = View.GONE
+            return
+        }
+        if (isSwitchingEpisode) return
+        isSwitchingEpisode = true
+
+        saveProgressIfNeeded()
+
+        currentEpisodeIndex = index
+        val (epName, epUrl) = episodeList[index]
+        episodeUrl = epUrl
+        subtitle = epName
+        currentResolvedUrl = ""
+        pendingResumeMs = 0L
+        hasAppliedResume = false
+        historyKey = TvBoxApp.get().watchHistoryRepository.buildKey(siteKey, sourceUrl, episodeUrl)
+
+        TvBoxApp.get().watchHistoryRepository.find(siteKey, sourceUrl, episodeUrl)?.let { history ->
+            if (history.positionMs > RESUME_THRESHOLD_MS) {
+                pendingResumeMs = history.positionMs
+            }
+            currentResolvedUrl = history.resolvedUrl.orEmpty()
+        }
+
+        titleView.text = buildTitleText()
+        updateNextButton()
+
+        // Update episode adapter selection
+        (episodesList.adapter as? EpisodeAdapter)?.setSelectedIndex(currentEpisodeIndex)
+        episodesPanel.visibility = View.GONE
+
+        Toast.makeText(this, "正在播放: $epName", Toast.LENGTH_SHORT).show()
+        resolveAndPlay(forceRefresh = false)
+        isSwitchingEpisode = false
     }
 
     private fun updateNextButton() {
@@ -164,35 +310,166 @@ class PlayerActivity : FragmentActivity() {
      */
     private fun playNextEpisode() {
         if (currentEpisodeIndex < 0 || currentEpisodeIndex >= episodeList.size - 1) return
-        if (isSwitchingEpisode) return
-        isSwitchingEpisode = true
-
-        saveProgressIfNeeded()
-
-        currentEpisodeIndex++
-        val (epName, epUrl) = episodeList[currentEpisodeIndex]
-        episodeUrl = epUrl
-        subtitle = epName
-        currentResolvedUrl = ""
-        pendingResumeMs = 0L
-        hasAppliedResume = false
-        historyKey = TvBoxApp.get().watchHistoryRepository.buildKey(siteKey, sourceUrl, episodeUrl)
-
-        // Check if we have saved progress for this episode
-        TvBoxApp.get().watchHistoryRepository.find(siteKey, sourceUrl, episodeUrl)?.let { history ->
-            if (history.positionMs > RESUME_THRESHOLD_MS) {
-                pendingResumeMs = history.positionMs
-            }
-            currentResolvedUrl = history.resolvedUrl.orEmpty()
-        }
-
-        titleView.text = buildTitleText()
-        updateNextButton()
-
-        Toast.makeText(this, "正在播放: $epName", Toast.LENGTH_SHORT).show()
-        resolveAndPlay(forceRefresh = false)
-        isSwitchingEpisode = false
+        jumpToEpisode(currentEpisodeIndex + 1)
     }
+
+    // ============================================================
+    // v1.0.16 Quality / Audio
+    // ============================================================
+
+    private fun showQualityDialog() {
+        episodesPanel.visibility = View.GONE
+        optionsPanel.visibility = View.VISIBLE
+        optionsTitle.text = getString(R.string.player_quality)
+        val options = QualityTier.entries
+        val adapter = OptionAdapter(
+            options.map { getString(it.labelResId) },
+            options.indexOf(selectedQuality)
+        ) { index ->
+            val tier = QualityTier.entries[index]
+            applyQuality(tier)
+            optionsPanel.visibility = View.GONE
+        }
+        optionsList.layoutManager = LinearLayoutManager(this)
+        optionsList.adapter = adapter
+    }
+
+    private fun showAudioDialog() {
+        episodesPanel.visibility = View.GONE
+        optionsPanel.visibility = View.VISIBLE
+        optionsTitle.text = getString(R.string.player_audio_mode)
+        val options = AudioMode.entries
+        val adapter = OptionAdapter(
+            options.map { getString(it.labelResId) },
+            options.indexOf(selectedAudioMode)
+        ) { index ->
+            val mode = AudioMode.entries[index]
+            applyAudioMode(mode)
+            optionsPanel.visibility = View.GONE
+        }
+        optionsList.layoutManager = LinearLayoutManager(this)
+        optionsList.adapter = adapter
+    }
+
+    /**
+     * Apply quality selection by setting TrackSelectionParameters.
+     */
+    private fun applyQuality(tier: QualityTier) {
+        val exo = player ?: run {
+            selectedQuality = tier
+            Toast.makeText(this, getString(R.string.player_quality_applied, getString(tier.labelResId)), Toast.LENGTH_SHORT).show()
+            return
+        }
+        selectedQuality = tier
+        val params = exo.trackSelectionParameters.buildUpon()
+            .setMaxVideoSize(Int.MAX_VALUE, tier.maxHeight)
+            .build()
+        // AUTO = clear restriction
+        if (tier == QualityTier.AUTO) {
+            val autoParams = exo.trackSelectionParameters.buildUpon()
+                .clearVideoSizeConstraints()
+                .build()
+            exo.trackSelectionParameters = autoParams
+        } else {
+            exo.trackSelectionParameters = params
+        }
+        Toast.makeText(this, getString(R.string.player_quality_applied, getString(tier.labelResId)), Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * Apply audio mode by configuring LoudnessEnhancer + Equalizer preset.
+     */
+    private fun applyAudioMode(mode: AudioMode) {
+        selectedAudioMode = mode
+        val sessId = audioSessionId
+        if (sessId == C.AUDIO_SESSION_ID_UNSET) {
+            Toast.makeText(this, getString(R.string.player_audio_applied, getString(mode.labelResId)), Toast.LENGTH_SHORT).show()
+            return
+        }
+        try {
+            // Re-create loudness enhancer
+            loudnessEnhancer?.let { eff -> eff.release() }
+            loudnessEnhancer = LoudnessEnhancer(sessId).apply {
+                // Mode-specific gain in millibels (1 dB = 100 mB)
+                val gainMb = when (mode) {
+                    AudioMode.STANDARD -> 0       // 0 dB (no boost)
+                    AudioMode.MUSIC -> 600        // +6 dB (boost music)
+                    AudioMode.MOVIE -> 800        // +8 dB (cinema punch)
+                    AudioMode.DOLBY -> 1200       // +12 dB (Dolby-style loudness)
+                    AudioMode.VOICE -> 400        // +4 dB (voice clarity)
+                }
+                setTargetGain(gainMb)
+                enabled = true
+            }
+            // Configure equalizer preset
+            equalizer?.let { eff -> eff.release() }
+            equalizer = Equalizer(0, sessId).apply {
+                when (mode) {
+                    AudioMode.STANDARD -> {
+                        // Standard: keep current preset or first
+                        enabled = true
+                    }
+                    AudioMode.MUSIC -> {
+                        val idx = findPresetContains("Pop") ?: findPresetContains("Rock") ?: 0
+                        usePreset(idx.toShort())
+                        enabled = true
+                    }
+                    AudioMode.MOVIE -> {
+                        val idx = findPresetContains("Movie") ?: findPresetContains("Cinema") ?: 0
+                        usePreset(idx.toShort())
+                        enabled = true
+                    }
+                    AudioMode.DOLBY -> {
+                        // Boost bass + treble for dolby-style
+                        val bands = numberOfBands.toInt()
+                        if (bands > 0) setBandLevel(0.toShort(), 800.toShort())
+                        if (bands > 7) setBandLevel(7.toShort(), 600.toShort())
+                        enabled = true
+                    }
+                    AudioMode.VOICE -> {
+                        // Boost mid for voice clarity
+                        val bands = numberOfBands.toInt()
+                        if (bands > 3) setBandLevel(3.toShort(), 700.toShort())
+                        if (bands > 4) setBandLevel(4.toShort(), 700.toShort())
+                        enabled = true
+                    }
+                }
+            }
+            Log.i(TAG, "Audio mode applied: $mode (sessId=$sessId)")
+        } catch (t: Throwable) {
+            Log.w(TAG, "applyAudioMode failed for $mode", t)
+        }
+        Toast.makeText(this, getString(R.string.player_audio_applied, getString(mode.labelResId)), Toast.LENGTH_SHORT).show()
+    }
+
+    private fun findPresetContains(keyword: String): Int? {
+        val eq = equalizer ?: return null
+        return try {
+            val total = eq.numberOfPresets.toInt()
+            for (i in 0 until total) {
+                val name = eq.getPresetName(i.toShort())
+                if (name.contains(keyword, ignoreCase = true)) return i
+            }
+            null
+        } catch (t: Throwable) { null }
+    }
+
+    private fun releaseAudioEffects() {
+        val le = loudnessEnhancer
+        if (le != null) {
+            try { le.release() } catch (_: Throwable) {}
+        }
+        val eq = equalizer
+        if (eq != null) {
+            try { eq.release() } catch (_: Throwable) {}
+        }
+        loudnessEnhancer = null
+        equalizer = null
+    }
+
+    // ============================================================
+    // Original playback methods (largely unchanged from v1.0.15)
+    // ============================================================
 
     /**
      * 重新解析剧集 URL -> m3u8 -> 播放。
@@ -202,6 +479,7 @@ class PlayerActivity : FragmentActivity() {
         saveProgressIfNeeded()
         player?.release()
         player = null
+        releaseAudioEffects()
         hasAppliedResume = false
         loadingView.visibility = View.VISIBLE
         errorPanel.visibility = View.GONE
@@ -264,6 +542,14 @@ class PlayerActivity : FragmentActivity() {
         playerView.player = exo
         playerView.visibility = View.VISIBLE
 
+        // Apply current quality preference to new player
+        if (selectedQuality != QualityTier.AUTO) {
+            val params = exo.trackSelectionParameters.buildUpon()
+                .setMaxVideoSize(Int.MAX_VALUE, selectedQuality.maxHeight)
+                .build()
+            exo.trackSelectionParameters = params
+        }
+
         exo.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 saveProgressIfNeeded()
@@ -282,6 +568,8 @@ class PlayerActivity : FragmentActivity() {
                     loadingView.visibility = View.GONE
                     applyResumeIfNeeded(exo)
                     saveProgressIfNeeded()
+                    // Capture audio session ID once available
+                    captureAudioSessionId(exo)
                 }
                 if (state == Player.STATE_ENDED) {
                     saveProgressIfNeeded()
@@ -303,6 +591,28 @@ class PlayerActivity : FragmentActivity() {
         player = exo
     }
 
+    private fun captureAudioSessionId(exo: ExoPlayer) {
+        // Audio session ID becomes available after audio renderer has the output
+        // Try several times as it's set asynchronously
+        lifecycleScope.launch {
+            repeat(10) { i ->
+                val id = exo.audioSessionId.takeIf { it != C.AUDIO_SESSION_ID_UNSET } ?: run {
+                    delay(300)
+                    return@repeat
+                }
+                if (id != audioSessionId) {
+                    audioSessionId = id
+                    Log.i(TAG, "captured audioSessionId=$id")
+                    // Re-apply current audio mode to new session
+                    if (selectedAudioMode != AudioMode.STANDARD) {
+                        applyAudioMode(selectedAudioMode)
+                    }
+                }
+                return@launch
+            }
+        }
+    }
+
     /**
      * Called when the current episode finishes playing (STATE_ENDED).
      * Auto-plays the next episode if enabled.
@@ -312,7 +622,6 @@ class PlayerActivity : FragmentActivity() {
         if (currentEpisodeIndex < 0 || currentEpisodeIndex >= episodeList.size - 1) return
 
         Log.i(TAG, "Episode ended, auto-playing next (index=${currentEpisodeIndex + 1})")
-        // Small delay for UX
         lifecycleScope.launch {
             delay(800)
             playNextEpisode()
@@ -408,15 +717,22 @@ class PlayerActivity : FragmentActivity() {
 
     override fun onDestroy() {
         saveProgressIfNeeded()
-        super.onDestroy()
         player?.release()
         player = null
+        releaseAudioEffects()
+        super.onDestroy()
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
             if (errorPanel.visibility == View.VISIBLE) {
                 finish()
+                return true
+            }
+            // Close any open panel first
+            if (optionsPanel.visibility == View.VISIBLE || episodesPanel.visibility == View.VISIBLE) {
+                optionsPanel.visibility = View.GONE
+                episodesPanel.visibility = View.GONE
                 return true
             }
             saveProgressIfNeeded()
@@ -429,6 +745,14 @@ class PlayerActivity : FragmentActivity() {
             (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && event?.repeatCount ?: 0 > 5)) {
             if (currentEpisodeIndex >= 0 && currentEpisodeIndex < episodeList.size - 1) {
                 playNextEpisode()
+                return true
+            }
+        }
+        // KEYCODE_DPAD_LEFT long press: previous episode
+        if (keyCode == KeyEvent.KEYCODE_MEDIA_PREVIOUS ||
+            (keyCode == KeyEvent.KEYCODE_DPAD_LEFT && event?.repeatCount ?: 0 > 5)) {
+            if (currentEpisodeIndex > 0) {
+                jumpToEpisode(currentEpisodeIndex - 1)
                 return true
             }
         }
@@ -486,7 +810,6 @@ class PlayerActivity : FragmentActivity() {
             putExtra(EXTRA_SOURCE_URL, sourceUrl)
             putExtra(EXTRA_EPISODE_URL, episodeUrl)
             putExtra(EXTRA_VIDEO_ID, videoId ?: "")
-            // Serialize episode list as JSON
             val arr = JSONArray()
             for ((name, url) in episodeList) {
                 val obj = org.json.JSONObject()
@@ -497,5 +820,71 @@ class PlayerActivity : FragmentActivity() {
             putExtra(EXTRA_EPISODE_LIST, arr.toString())
             putExtra(EXTRA_EPISODE_INDEX, episodeIndex)
         }
+    }
+}
+
+/**
+ * Adapter for the bottom episode chip strip (v1.0.16).
+ * Each item is a single episode name. Tapping jumps to that episode.
+ */
+internal class EpisodeAdapter(
+    private var items: List<Pair<String, String>>,
+    private var selectedIndex: Int,
+    private val onClick: (Int) -> Unit
+) : RecyclerView.Adapter<EpisodeAdapter.VH>() {
+
+    fun setSelectedIndex(index: Int) {
+        val old = selectedIndex
+        selectedIndex = index
+        if (old in items.indices) notifyItemChanged(old)
+        if (index in items.indices) notifyItemChanged(index)
+    }
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+        val v = LayoutInflater.from(parent.context)
+            .inflate(R.layout.item_player_episode, parent, false)
+        return VH(v)
+    }
+
+    override fun onBindViewHolder(holder: VH, position: Int) {
+        val (name, _) = items[position]
+        holder.name.text = name
+        holder.itemView.isSelected = (position == selectedIndex)
+        holder.itemView.setOnClickListener { onClick(position) }
+    }
+
+    override fun getItemCount(): Int = items.size
+
+    class VH(view: View) : RecyclerView.ViewHolder(view) {
+        val name: TextView = view.findViewById(R.id.item_episode_name)
+    }
+}
+
+/**
+ * Adapter for quality / audio mode options dialog (v1.0.16).
+ */
+internal class OptionAdapter(
+    private val labels: List<String>,
+    private var selectedIndex: Int,
+    private val onClick: (Int) -> Unit
+) : RecyclerView.Adapter<OptionAdapter.VH>() {
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+        val v = LayoutInflater.from(parent.context)
+            .inflate(R.layout.item_player_option, parent, false)
+        return VH(v)
+    }
+
+    override fun onBindViewHolder(holder: VH, position: Int) {
+        holder.label.text = labels[position]
+        holder.check.visibility = if (position == selectedIndex) View.VISIBLE else View.GONE
+        holder.itemView.setOnClickListener { onClick(position) }
+    }
+
+    override fun getItemCount(): Int = labels.size
+
+    class VH(view: View) : RecyclerView.ViewHolder(view) {
+        val label: TextView = view.findViewById(R.id.item_option_label)
+        val check: TextView = view.findViewById(R.id.item_option_check)
     }
 }
