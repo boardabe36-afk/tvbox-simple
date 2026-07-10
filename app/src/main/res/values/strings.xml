@@ -56,4 +56,16 @@
     <string name="player_episode_loading">选集加载中…</string>
     <string name="player_quality_applied">已切换画质: %1$s</string>
     <string name="player_audio_applied">已切换音效: %1$s</string>
+
+    <!-- 播放器 (v1.0.18) -->
+    <string name="player_audio_custom">自定义 EQ</string>
+    <string name="player_speed">倍速</string>
+    <string name="player_speed_applied">已切换倍速: %1$s</string>
+    <string name="player_eq_dialog_title">自定义均衡器</string>
+    <string name="player_eq_reset">重置</string>
+    <string name="player_eq_bass">低音</string>
+    <string name="player_eq_mid_bass">中低音</string>
+    <string name="player_eq_mid">中音</string>
+    <string name="player_eq_mid_treble">中高音</string>
+    <string name="player_eq_treble">高音</string>
 </resources>

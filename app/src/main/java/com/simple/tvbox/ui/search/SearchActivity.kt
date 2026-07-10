@@ -6,9 +6,11 @@ import android.graphics.Color
 import android.os.Bundle
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.widget.Button
 import android.widget.EditText
 import android.widget.GridLayout
 import android.widget.LinearLayout
@@ -17,12 +19,15 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.simple.tvbox.R
 import com.simple.tvbox.TvBoxApp
 import com.simple.tvbox.model.SpiderSite
 import com.simple.tvbox.model.VideoItem
 import com.simple.tvbox.source.VideoClientFactory
 import com.simple.tvbox.ui.detail.DetailActivity
+import com.simple.tvbox.util.SearchHistoryPrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -31,6 +36,8 @@ import kotlinx.coroutines.withContext
 
 /**
  * 搜索页：聚合多个源做搜索，结果全局按匹配精度排序并网格展示。
+ *
+ * v1.0.18 新增：搜索历史（横滑 chip，带 ✕ 删除按钮，输入框聚焦且无结果时显示）。
  */
 class SearchActivity : FragmentActivity() {
 
@@ -38,6 +45,12 @@ class SearchActivity : FragmentActivity() {
     private lateinit var progress: ProgressBar
     private lateinit var emptyText: TextView
     private lateinit var resultsContainer: GridLayout
+    private lateinit var historyPanel: View
+    private lateinit var historyList: RecyclerView
+    private lateinit var historyClearBtn: Button
+    private lateinit var resultsScroll: View
+
+    private val historyPrefs by lazy { SearchHistoryPrefs(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,6 +60,31 @@ class SearchActivity : FragmentActivity() {
         progress = findViewById(R.id.search_progress)
         emptyText = findViewById(R.id.search_empty)
         resultsContainer = findViewById(R.id.search_results_container)
+        historyPanel = findViewById(R.id.search_history_panel)
+        historyList = findViewById(R.id.search_history_list)
+        historyClearBtn = findViewById(R.id.search_history_clear)
+        resultsScroll = findViewById(R.id.search_results_scroll)
+
+        historyList.layoutManager = LinearLayoutManager(this, RecyclerView.HORIZONTAL, false)
+        historyList.adapter = HistoryAdapter(emptyList(),
+            onClick = { kw -> selectHistory(kw) },
+            onRemove = { kw -> removeHistory(kw) }
+        )
+
+        historyClearBtn.setOnClickListener {
+            historyPrefs.clear()
+            refreshHistoryPanel()
+        }
+
+        // 输入框焦点变化：拿到焦点且无结果时显示历史列表
+        searchInput.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus && resultsContainer.childCount == 0) {
+                showHistoryPanel()
+            }
+        }
+        searchInput.setOnClickListener {
+            if (resultsContainer.childCount == 0) showHistoryPanel()
+        }
 
         searchInput.setOnEditorActionListener { _, actionId, event ->
             val isSubmit = actionId == EditorInfo.IME_ACTION_SEARCH ||
@@ -59,11 +97,45 @@ class SearchActivity : FragmentActivity() {
         }
         searchInput.requestFocus()
 
-        intent.getStringExtra(EXTRA_QUERY)?.takeIf { it.isNotBlank() }?.let { query ->
-            searchInput.setText(query)
-            searchInput.setSelection(query.length)
+        val initialQuery = intent.getStringExtra(EXTRA_QUERY)?.takeIf { it.isNotBlank() }
+        if (initialQuery != null) {
+            searchInput.setText(initialQuery)
+            searchInput.setSelection(initialQuery.length)
             doSearch()
+        } else {
+            refreshHistoryPanel()
         }
+    }
+
+    private fun selectHistory(keyword: String) {
+        searchInput.setText(keyword)
+        searchInput.setSelection(keyword.length)
+        doSearch()
+    }
+
+    private fun removeHistory(keyword: String) {
+        historyPrefs.remove(keyword)
+        refreshHistoryPanel()
+    }
+
+    private fun refreshHistoryPanel() {
+        val items = historyPrefs.getAll()
+        (historyList.adapter as? HistoryAdapter)?.update(items)
+        if (items.isNotEmpty() && resultsContainer.childCount == 0) {
+            showHistoryPanel()
+        } else {
+            hideHistoryPanel()
+        }
+    }
+
+    private fun showHistoryPanel() {
+        historyPanel.visibility = View.VISIBLE
+        resultsScroll.visibility = View.GONE
+    }
+
+    private fun hideHistoryPanel() {
+        historyPanel.visibility = View.GONE
+        resultsScroll.visibility = View.VISIBLE
     }
 
     private fun doSearch() {
@@ -77,6 +149,8 @@ class SearchActivity : FragmentActivity() {
         progress.visibility = View.VISIBLE
         emptyText.visibility = View.GONE
         resultsContainer.removeAllViews()
+        hideHistoryPanel()
+        historyPrefs.add(keyword)
 
         lifecycleScope.launch {
             try {
@@ -91,14 +165,12 @@ class SearchActivity : FragmentActivity() {
                 }
 
                 val ranked: List<SearchResult> = withContext(Dispatchers.IO) {
-                    // 同步过滤支持的源
                     val supportedSites = sites.filter { VideoClientFactory.create(it).isSupported() }
                     supportedSites.map { site ->
                         async {
                             runCatching {
                                 val client = VideoClientFactory.create(site)
                                 if (client.isSupported()) {
-                                    // 1. 原始搜索
                                     val primaryResults = client.search(keyword, 1)
                                         .map { v ->
                                             SearchResult(
@@ -107,7 +179,6 @@ class SearchActivity : FragmentActivity() {
                                                 MatchScorer.score(keyword, v.title, v.subTitle)
                                             )
                                         }
-                                    // 2. 同时跑"清理后标题"作为副查询（处理 "三体" vs "三体2：黑暗森林"）
                                     val cleanedTitle = stripSearchNoise(keyword)
                                     val secondaryResults = if (cleanedTitle.isNotBlank() && cleanedTitle != keyword) {
                                         runCatching {
@@ -126,12 +197,9 @@ class SearchActivity : FragmentActivity() {
                         }
                     }.awaitAll()
                         .flatten()
-                        // 同站同视频去重（同 id 不同结果时取高分）
                         .groupBy { it.site.key + "::" + it.item.id }
                         .map { (_, group) -> group.maxByOrNull { it.score }!! }
-                        // 过滤掉明显负分（完全无关）
                         .filter { it.score > -1000 }
-                        // 排序：高分优先；同时控制同源霸榜（同源 top 3，后续扣分）
                         .let { dedupBySiteTop3(it) }
                         .sortedWith(
                             compareByDescending<SearchResult> { it.score }
@@ -217,19 +285,12 @@ class SearchActivity : FragmentActivity() {
         return card
     }
 
-    /**
-     * 搜索噪音词（用于二次搜索的 query 清理）
-     */
     private val SEARCH_NOISE = listOf(
         "1080p", "720p", "4k", "8k", "hd", "bd",
         "国语", "粤语", "中字", "双语", "高清", "蓝光",
         "全集", "完整版", "更新至", "完结"
     )
 
-    /**
-     * 去掉搜索关键词里的噪音词（保留原始中文部分）。
-     * 用于跑第二次搜索以提高匹配率。
-     */
     private fun stripSearchNoise(keyword: String): String {
         var k = keyword
         for (n in SEARCH_NOISE) {
@@ -239,10 +300,6 @@ class SearchActivity : FragmentActivity() {
         return k.trim().replace(Regex("\\s+"), " ")
     }
 
-    /**
-     * 同源去重：每个 sourceKey 最多保留 top 3 结果，超过的每多 1 条扣 1500 分。
-     * 防止单个源霸榜前 100。
-     */
     private fun dedupBySiteTop3(results: List<SearchResult>): List<SearchResult> {
         val bySite = results.groupBy { it.site.key }
         return bySite.flatMap { (_, list) ->
@@ -257,6 +314,41 @@ class SearchActivity : FragmentActivity() {
     private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
 
     private data class SearchResult(val site: SpiderSite, val item: VideoItem, val score: Int)
+
+    /**
+     * v1.0.18 搜索历史 chip Adapter（带 ✕ 删除按钮）
+     */
+    private inner class HistoryAdapter(
+        var items: List<String>,
+        val onClick: (String) -> Unit,
+        val onRemove: (String) -> Unit
+    ) : RecyclerView.Adapter<HistoryAdapter.VH>() {
+
+        fun update(newItems: List<String>) {
+            items = newItems
+            notifyDataSetChanged()
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+            val v = LayoutInflater.from(parent.context)
+                .inflate(R.layout.item_search_history, parent, false)
+            return VH(v)
+        }
+
+        override fun onBindViewHolder(holder: VH, position: Int) {
+            val kw = items[position]
+            holder.keyword.text = kw
+            holder.itemView.setOnClickListener { onClick(kw) }
+            holder.remove.setOnClickListener { onRemove(kw) }
+        }
+
+        override fun getItemCount(): Int = items.size
+
+        inner class VH(view: View) : RecyclerView.ViewHolder(view) {
+            val keyword: TextView = view.findViewById(R.id.item_history_keyword)
+            val remove: TextView = view.findViewById(R.id.item_history_remove)
+        }
+    }
 
     companion object {
         private const val EXTRA_QUERY = "query"

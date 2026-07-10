@@ -2,6 +2,7 @@ package com.simple.tvbox.ui.player
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
 import android.media.audiofx.Equalizer
 import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
@@ -75,6 +76,7 @@ class PlayerActivity : FragmentActivity() {
     private lateinit var autoPlayToggle: Button
     private lateinit var qualityBtn: Button
     private lateinit var audioBtn: Button
+    private lateinit var speedBtn: Button
     private lateinit var episodesToggleBtn: Button
     private lateinit var episodesPanel: LinearLayout
     private lateinit var episodesList: RecyclerView
@@ -123,8 +125,24 @@ class PlayerActivity : FragmentActivity() {
         MOVIE(R.string.player_audio_movie),
         DOLBY(R.string.player_audio_dolby),
         VOICE(R.string.player_audio_voice),
+        CUSTOM(R.string.player_audio_custom),
     }
     private var selectedAudioMode: AudioMode = AudioMode.STANDARD
+
+    // Custom EQ band levels (mB), 5 bands covering low/mid/high.
+    // Indexed from 0 = lowest band to 4 = highest band.
+    private val customEqLevels = ShortArray(5) { 0 }
+    private var lastKeyDownTimestamp: Long = 0L
+
+    // Playback speed (v1.0.18)
+    private enum class PlaybackSpeed(val rate: Float, val label: String) {
+        SLOW_075(0.75f, "0.75x"),
+        NORMAL_100(1.0f, "1.0x"),
+        FAST_125(1.25f, "1.25x"),
+        FAST_150(1.5f, "1.5x"),
+        FAST_200(2.0f, "2.0x"),
+    }
+    private var selectedSpeed: PlaybackSpeed = PlaybackSpeed.NORMAL_100
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -180,6 +198,7 @@ class PlayerActivity : FragmentActivity() {
         autoPlayToggle = findViewById(R.id.player_autoplay_toggle)
         qualityBtn = findViewById(R.id.player_quality_btn)
         audioBtn = findViewById(R.id.player_audio_btn)
+        speedBtn = findViewById(R.id.player_speed_btn)
         episodesToggleBtn = findViewById(R.id.player_episodes_toggle_btn)
         episodesPanel = findViewById(R.id.player_episodes_panel)
         episodesList = findViewById(R.id.player_episodes_list)
@@ -204,7 +223,9 @@ class PlayerActivity : FragmentActivity() {
         }
         qualityBtn.setOnClickListener { showQualityDialog() }
         audioBtn.setOnClickListener { showAudioDialog() }
+        speedBtn.setOnClickListener { showSpeedDialog() }
         episodesToggleBtn.setOnClickListener { toggleEpisodesPanel() }
+        updateSpeedButton()
 
         // Setup episodes list
         setupEpisodesList()
@@ -344,11 +365,174 @@ class PlayerActivity : FragmentActivity() {
             options.indexOf(selectedAudioMode)
         ) { index ->
             val mode = AudioMode.entries[index]
-            applyAudioMode(mode)
+            if (mode == AudioMode.CUSTOM) {
+                optionsPanel.visibility = View.GONE
+                showCustomEqDialog()
+            } else {
+                applyAudioMode(mode)
+                optionsPanel.visibility = View.GONE
+            }
+        }
+        optionsList.layoutManager = LinearLayoutManager(this)
+        optionsList.adapter = adapter
+    }
+
+    private fun showSpeedDialog() {
+        episodesPanel.visibility = View.GONE
+        optionsPanel.visibility = View.VISIBLE
+        optionsTitle.text = getString(R.string.player_speed)
+        val options = PlaybackSpeed.entries
+        val adapter = OptionAdapter(
+            options.map { it.label },
+            options.indexOf(selectedSpeed)
+        ) { index ->
+            val speed = PlaybackSpeed.entries[index]
+            applySpeed(speed)
             optionsPanel.visibility = View.GONE
         }
         optionsList.layoutManager = LinearLayoutManager(this)
         optionsList.adapter = adapter
+    }
+
+    private fun applySpeed(speed: PlaybackSpeed) {
+        selectedSpeed = speed
+        player?.setPlaybackSpeed(speed.rate)
+        updateSpeedButton()
+        Toast.makeText(this,
+            getString(R.string.player_speed_applied, speed.label),
+            Toast.LENGTH_SHORT).show()
+    }
+
+    private fun updateSpeedButton() {
+        speedBtn.text = selectedSpeed.label
+    }
+
+    /**
+     * v1.0.18 自定义 EQ 对话框：5 段 SeekBar，实时设置 Equalizer.setBandLevel。
+     * Equalizer 一般有 5 个 band（设备不同 5-10 个）。取最低 5 个频率。
+     */
+    private fun showCustomEqDialog() {
+        val eq = equalizer
+        if (eq == null || audioSessionId == C.AUDIO_SESSION_ID_UNSET) {
+            Toast.makeText(this, "音频会话未就绪", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val totalBands = eq.numberOfBands.toInt()
+        if (totalBands < 1) {
+            Toast.makeText(this, "本设备不支持均衡器", Toast.LENGTH_SHORT).show()
+            return
+        }
+        // Equalizer 各 band 频率范围 (mHz) — 我们选 5 个代表频段：
+        // 低音 (60-100Hz), 中低音 (250Hz), 中音 (1kHz), 中高音 (4kHz), 高音 (10-14kHz)
+        // 这里用均匀取 5 段 (把可用的 band 等分到 5 段)
+        val bandCount = 5
+        val bandIndices = IntArray(bandCount) { i ->
+            // 等分采样: 跳过最低 1/8 + 最高 1/8, 防止极端频段
+            val start = (totalBands / 8).coerceAtLeast(0)
+            val end = (totalBands - totalBands / 8).coerceAtMost(totalBands)
+            val span = (end - start).coerceAtLeast(1)
+            start + (i * span / bandCount).coerceAtMost(span - 1)
+        }
+        val labels = listOf(
+            R.string.player_eq_bass,
+            R.string.player_eq_mid_bass,
+            R.string.player_eq_mid,
+            R.string.player_eq_mid_treble,
+            R.string.player_eq_treble
+        )
+
+        // 加载当前 band level
+        for (i in bandIndices.indices) {
+            try {
+                customEqLevels[i] = eq.getBandLevel(bandIndices[i].toShort())
+            } catch (_: Throwable) { customEqLevels[i] = 0 }
+        }
+
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_eq, null, false)
+        val bandsContainer = dialogView.findViewById<LinearLayout>(R.id.eq_bands_container)
+        val seekBars = mutableListOf<android.widget.SeekBar>()
+
+        // Equalizer 范围 (mB)
+        val range = runCatching { eq.bandLevelRange }.getOrDefault(shortArrayOf(-1500, 1500))
+        val minMb = range[0].toInt()
+        val maxMb = range[1].toInt()
+        val spanMb = (maxMb - minMb).coerceAtLeast(1)
+
+        val density = resources.displayMetrics.density
+
+        for (i in 0 until bandCount) {
+            val col = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = android.view.Gravity.CENTER_HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                setPadding((4 * density).toInt(), 0, (4 * density).toInt(), 0)
+            }
+            val label = TextView(this).apply {
+                text = getString(labels[i])
+                setTextColor(Color.WHITE)
+                textSize = 12f
+                gravity = android.view.Gravity.CENTER
+            }
+            val valueLabel = TextView(this).apply {
+                text = String.format("%+d dB", customEqLevels[i] / 100)
+                setTextColor(Color.LTGRAY)
+                textSize = 11f
+                gravity = android.view.Gravity.CENTER
+            }
+            // 垂直 SeekBar 模拟：用横向 SeekBar 但 rotation 90 太复杂; 用 Horizontal 显示 db 数
+            val sb = android.widget.SeekBar(this).apply {
+                max = spanMb
+                progress = (customEqLevels[i].toInt() - minMb).coerceIn(0, spanMb)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    (40 * density).toInt()
+                )
+            }
+            sb.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                    val mb = (progress + minMb).toShort()
+                    customEqLevels[i] = mb
+                    valueLabel.text = String.format("%+d dB", mb / 100)
+                    try {
+                        eq.setBandLevel(bandIndices[i].toShort(), mb)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "setBandLevel failed", t)
+                    }
+                }
+                override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
+            })
+            col.addView(label)
+            col.addView(sb)
+            col.addView(valueLabel)
+            bandsContainer.addView(col)
+            seekBars.add(sb)
+        }
+
+        dialogView.findViewById<Button>(R.id.eq_reset).setOnClickListener {
+            // 重置所有 band 到 0
+            for (i in 0 until bandCount) {
+                customEqLevels[i] = 0
+                seekBars[i].progress = -minMb
+                try { eq.setBandLevel(bandIndices[i].toShort(), 0) } catch (_: Throwable) {}
+            }
+            Toast.makeText(this, "已重置 EQ", Toast.LENGTH_SHORT).show()
+        }
+        dialogView.findViewById<Button>(R.id.eq_close).setOnClickListener {
+            (it.context as? android.app.Activity)?.let { d -> /* close */ }
+            // 用 dialog dismiss
+            (dialogView.parent as? android.view.ViewGroup)?.removeView(dialogView)
+            (this as? FragmentActivity)?.let { _ -> }
+        }
+
+        // 用 AlertDialog 包
+        val dialog = android.app.AlertDialog.Builder(this)
+            .setView(dialogView)
+            .create()
+        dialogView.findViewById<Button>(R.id.eq_close).setOnClickListener { dialog.dismiss() }
+        dialog.show()
+        // 标记为自定义 EQ
+        selectedAudioMode = AudioMode.CUSTOM
     }
 
     /**
@@ -397,6 +581,7 @@ class PlayerActivity : FragmentActivity() {
                     AudioMode.MOVIE -> 800        // +8 dB (cinema punch)
                     AudioMode.DOLBY -> 1200       // +12 dB (Dolby-style loudness)
                     AudioMode.VOICE -> 400        // +4 dB (voice clarity)
+                    AudioMode.CUSTOM -> 0         // Custom EQ uses user's band levels, no loudness boost
                 }
                 setTargetGain(gainMb)
                 enabled = true
@@ -432,6 +617,25 @@ class PlayerActivity : FragmentActivity() {
                         if (bands > 3) setBandLevel(3.toShort(), 700.toShort())
                         if (bands > 4) setBandLevel(4.toShort(), 700.toShort())
                         enabled = true
+                    }
+                    AudioMode.CUSTOM -> {
+                        // Restore custom EQ band levels (user's previous adjustments)
+                        enabled = true
+                        try {
+                            val bands = numberOfBands.toInt()
+                            if (bands >= 1) {
+                                // Map 5 custom levels to available bands
+                                val start = (bands / 8).coerceAtLeast(0)
+                                val end = (bands - bands / 8).coerceAtMost(bands)
+                                val span = (end - start).coerceAtLeast(5)
+                                for (i in 0 until 5) {
+                                    val targetBand = (start + i * span / 5).coerceAtMost(bands - 1)
+                                    setBandLevel(targetBand.toShort(), customEqLevels[i])
+                                }
+                            }
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "restore custom EQ failed", t)
+                        }
                     }
                 }
             }
@@ -755,6 +959,28 @@ class PlayerActivity : FragmentActivity() {
                 jumpToEpisode(currentEpisodeIndex - 1)
                 return true
             }
+        }
+        // v1.0.18 KEYCODE_DPAD_CENTER long press: 循环切换倍速
+        if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER && event?.repeatCount ?: 0 == 0) {
+            lastKeyDownTimestamp = System.currentTimeMillis()
+        }
+        if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER && event?.action == KeyEvent.ACTION_UP) {
+            val held = System.currentTimeMillis() - lastKeyDownTimestamp
+            if (held in 400..1500 && selectedSpeed != PlaybackSpeed.NORMAL_100) {
+                // 长按松开回到 1.0x
+                applySpeed(PlaybackSpeed.NORMAL_100)
+                return true
+            }
+        }
+        // v1.0.18 KEYCODE_DPAD_UP long press: 弹倍速选择 dialog
+        if (keyCode == KeyEvent.KEYCODE_DPAD_UP && event?.repeatCount ?: 0 > 5) {
+            showSpeedDialog()
+            return true
+        }
+        // v1.0.18 KEYCODE_DPAD_DOWN long press: 弹音效 dialog
+        if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN && event?.repeatCount ?: 0 > 5) {
+            showAudioDialog()
+            return true
         }
         return super.onKeyDown(keyCode, event)
     }

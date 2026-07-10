@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="500dp"
+    android:layout_height="wrap_content"
+    android:background="#EE0F1014"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/player_eq_dialog_title"
+            android:textColor="#FFFFFF"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/eq_reset"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@color/tv_card_background"
+            android:paddingStart="16dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="8dp"
+            android:text="@string/player_eq_reset"
+            android:textColor="@color/tv_accent"
+            android:textSize="14sp"
+            android:focusable="true"
+            android:clickable="true" />
+
+        <Button
+            android:id="@+id/eq_close"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:background="@color/tv_card_background"
+            android:paddingStart="16dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="8dp"
+            android:text="✕"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:focusable="true"
+            android:clickable="true" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/eq_bands_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="horizontal"
+        android:weightSum="5">
+
+        <!-- 5 bands added programmatically in PlayerActivity -->
+    </LinearLayout>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:gravity="center"
+        android:text="-15 dB          0          +15 dB"
+        android:textColor="@color/tv_text_secondary"
+        android:textSize="12sp" />
+</LinearLayout>

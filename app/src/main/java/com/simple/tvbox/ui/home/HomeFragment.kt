@@ -79,6 +79,26 @@ class HomeFragment : BrowseSupportFragment() {
     private fun handleItemClick(item: Any?) {
         when (item) {
             is VideoCard -> {
+                // v1.0.18 继续观看卡片：直接进 PlayerActivity，从断点继续
+                if (item.isHistory && item.sourceUrl != null && item.id.startsWith("history::")) {
+                    val key = item.id.removePrefix("history::")
+                    val history = TvBoxApp.get().watchHistoryRepository
+                        .getAll().firstOrNull { it.key == key }
+                    if (history != null) {
+                        startActivity(
+                            com.simple.tvbox.ui.player.PlayerActivity.intent(
+                                requireContext(),
+                                title = history.title,
+                                subtitle = history.subtitle,
+                                siteKey = history.siteKey,
+                                sourceUrl = history.sourceUrl,
+                                episodeUrl = history.episodeUrl,
+                                videoId = history.videoId
+                            )
+                        )
+                        return
+                    }
+                }
                 if (item.videoId != null) {
                     startActivity(
                         com.simple.tvbox.ui.detail.DetailActivity.intent(
@@ -124,6 +144,9 @@ class HomeFragment : BrowseSupportFragment() {
                 val sources = TvBoxApp.get().sourceRepository.getAllSources()
                 // 快捷入口不依赖视频源
                 renderQuickEntryRow()
+                // v1.0.18: 继续观看 — 从历史里取未看完的项目，不依赖视频源
+                runCatching { renderContinueWatchingRow() }
+                    .onFailure { android.util.Log.e("HomeFragment", "renderContinueWatchingRow failed", it) }
                 if (sources.isEmpty()) {
                     renderEmptyState()
                     return@launch
@@ -527,6 +550,60 @@ class HomeFragment : BrowseSupportFragment() {
     }
 
     /**
+     * v1.0.18 继续观看行：从 watchHistoryRepository 取未看完的前 8 项，
+     * 按 updatedAt 倒序。未看完 = positionMs > 30s 且 (duration <= 0 || 剩余 > 60s)。
+     * 点击 → 进 PlayerActivity 从断点继续（PlayerActivity 会读 pendingResumeMs）。
+     */
+    private fun renderContinueWatchingRow() {
+        val historyItems = TvBoxApp.get().watchHistoryRepository.getAll()
+        val continueItems = historyItems
+            .filter { h ->
+                h.positionMs > 30_000L &&
+                    (h.durationMs <= 0L || (h.durationMs - h.positionMs) > 60_000L)
+            }
+            .take(8)
+        if (continueItems.isEmpty()) return
+
+        val header = HeaderItem(HEADER_CONTINUE_WATCHING, "继续观看")
+        val rowAdapter = ArrayObjectAdapter(CardPresenter())
+        continueItems.forEach { h ->
+            val resumeLabel = formatResumeMs(h.positionMs, h.durationMs)
+            rowAdapter.add(VideoCard(
+                id = "history::${h.key}",
+                title = h.title,
+                subTitle = listOfNotNull(
+                    h.subtitle,
+                    if (resumeLabel.isNotBlank()) "进度 $resumeLabel" else null
+                ).joinToString(" · "),
+                poster = null,
+                siteKey = h.siteKey,
+                sourceUrl = h.sourceUrl.ifBlank { null },
+                videoId = h.videoId,
+                historySubtitle = resumeLabel,
+                isHistory = true,
+                // 对于历史点击：走 PlayerActivity 而不是 DetailActivity
+                categoryId = null
+            ))
+        }
+        rowsAdapter.add(ListRow(header, rowAdapter))
+    }
+
+    private fun formatResumeMs(positionMs: Long, durationMs: Long): String {
+        fun fmt(ms: Long): String {
+            val totalSec = (ms / 1000).coerceAtLeast(0)
+            val h = totalSec / 3600
+            val m = (totalSec % 3600) / 60
+            val s = totalSec % 60
+            return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%02d:%02d".format(m, s)
+        }
+        return if (durationMs > 0) {
+            "${fmt(positionMs)} / ${fmt(durationMs)}"
+        } else {
+            fmt(positionMs)
+        }
+    }
+
+    /**
      * 行 2：已配置的源（点击查看该源分类页）
      */
     private fun renderConfiguredSourcesRow(sources: List<Source>) {
@@ -666,6 +743,7 @@ class HomeFragment : BrowseSupportFragment() {
     companion object {
         private const val HEADER_QUICK = 0L
         private const val HEADER_EMPTY = 1L
+        private const val HEADER_CONTINUE_WATCHING = 4L
         private const val HEADER_HOT = 2L
         private const val HEADER_SOURCES = 3L
         private const val HEADER_DOUBAN_QUICK = 10L

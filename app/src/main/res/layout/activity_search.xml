@@ -28,12 +28,62 @@
         android:textColorHint="@color/tv_text_secondary"
         android:textSize="20sp" />
 
+    <!-- v1.0.18 搜索历史行 -->
+    <LinearLayout
+        android:id="@+id/search_history_panel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="搜索历史"
+                android:textColor="@color/tv_text_primary"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/search_history_clear"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@color/tv_card_background"
+                android:paddingStart="20dp"
+                android:paddingTop="10dp"
+                android:paddingEnd="20dp"
+                android:paddingBottom="10dp"
+                android:text="清空"
+                android:textColor="@color/tv_accent"
+                android:textSize="14sp"
+                android:focusable="true"
+                android:clickable="true" />
+        </LinearLayout>
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/search_history_list"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:clipToPadding="false"
+            android:scrollbars="none" />
+    </LinearLayout>
+
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_marginTop="16dp">
 
         <ScrollView
+            android:id="@+id/search_results_scroll"
             android:layout_width="match_parent"
             android:layout_height="match_parent">
 
