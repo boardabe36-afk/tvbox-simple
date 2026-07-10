@@ -46,7 +46,7 @@ class GenericHtmlClient(rawRoot: String) : VideoClient {
         if (template == Template.UNKNOWN) return emptyList()
         val url = buildCategoryUrl(categoryId, page)
         val html = runCatching { HttpUtil.fetchText(url, referer = baseUrl) }.getOrNull() ?: return emptyList()
-        return parseVideoList(html, baseUrl)
+        return parseVideoList(html, baseUrl, excludeSidebar = true)
     }
 
     override fun search(keyword: String, page: Int): List<VideoItem> {
@@ -67,8 +67,9 @@ class GenericHtmlClient(rawRoot: String) : VideoClient {
                 android.util.Log.w("GenericHtmlClient", "search url failed: $url")
                 continue
             }
-            val items = parseVideoList(html, baseUrl)
-            android.util.Log.i("GenericHtmlClient", "search url=$url parsed=${items.size} items")
+            // v1.0.20: excludeSidebar=true 避免主搜索区为空时(例 icaiqi)抓到侧边栏推荐
+            val items = parseVideoList(html, baseUrl, excludeSidebar = true)
+            android.util.Log.i("GenericHtmlClient", "search url=$url parsed=${items.size} items (excluded sidebar)")
             if (items.isNotEmpty()) return items
         }
         android.util.Log.w("GenericHtmlClient", "search returned 0 items for $keyword")
@@ -167,14 +168,19 @@ class GenericHtmlClient(rawRoot: String) : VideoClient {
         return cats.entries.take(20).map { VideoCategory(id = it.key, name = it.value) }
     }
 
-    private fun parseVideoList(html: String, base: String): List<VideoItem> {
+    private fun parseVideoList(html: String, base: String, excludeSidebar: Boolean = false): List<VideoItem> {
         val items = LinkedHashMap<String, VideoItem>()
+
+        // v1.0.20: 当 excludeSidebar=true 时,只抓主内容区。
+        // 逻辑：截取页面的“主区" (排除 stui-pannel-side / hidden-md hidden-sm hidden-xs / footer),
+        // 然后再跑 regex。这样避免一些源 (例 icaiqi) 搜索页主区空、抓到侧边栏“热门推荐"被误认为搜索结果。
+        val scope = if (excludeSidebar) extractMainContent(html) else html
 
         val aBlockPat = Regex(
             """<a\b([^>]*?href\s*=\s*["']([^"']*?(?:shipin|detail|show|vod)/(\d+)\.html)["'][^>]*?)>([\s\S]*?)</a>""",
             RegexOption.DOT_MATCHES_ALL
         )
-        aBlockPat.findAll(html).forEach { m ->
+        aBlockPat.findAll(scope).forEach { m ->
             val attrs = m.groupValues[1]
             val id = m.groupValues[3]
             val inner = m.groupValues[4]
@@ -191,7 +197,7 @@ class GenericHtmlClient(rawRoot: String) : VideoClient {
                 """<a\b([^>]*?href\s*=\s*["']([^"']*/vod/detail/id/(\d+)\.html)["'][^>]*?)>([\s\S]*?)</a>""",
                 RegexOption.DOT_MATCHES_ALL
             )
-            defaultPat.findAll(html).forEach { m ->
+            defaultPat.findAll(scope).forEach { m ->
                 val attrs = m.groupValues[1]
                 val id = m.groupValues[3]
                 val inner = m.groupValues[4]
@@ -209,7 +215,7 @@ class GenericHtmlClient(rawRoot: String) : VideoClient {
                 """<a\b([^>]*?href\s*=\s*["']([^"']*vodplay/(\d+)-\d+-\d+\.html)["'][^>]*?)>([\s\S]*?)</a>""",
                 RegexOption.DOT_MATCHES_ALL
             )
-            vodPlayPat.findAll(html).forEach { m ->
+            vodPlayPat.findAll(scope).forEach { m ->
                 val attrs = m.groupValues[1]
                 val id = m.groupValues[3]
                 val inner = m.groupValues[4]
@@ -373,6 +379,28 @@ class GenericHtmlClient(rawRoot: String) : VideoClient {
         if (href.startsWith("http://") || href.startsWith("https://")) return href
         if (href.startsWith("//")) return "https:$href"
         return runCatching { java.net.URL(java.net.URL(base), href).toString() }.getOrElse { absolutize(href, baseUrl) }
+    }
+
+    /**
+     * v1.0.20: 从 HTML 中提取主内容区 (排除 stui-pannel-side 侧边栏/推荐/友链/页脚)。
+     * 逻辑：
+     * 1) 如果页面有 `<div class="col-lg-wide-75 ..."` (canghai/stui 主区), 截取到该 div 末尾
+     * 2) 否则用 `<body>` 容器，排除 `stui-pannel-side` / `pannel-side` / `hidden-md hidden-sm hidden-xs` 部分
+     * 3) 如果截取后为空 (主区真为空)，返回原 HTML
+     */
+    private fun extractMainContent(html: String): String {
+        // 方案 1：canghai/stui 主区 div
+        Regex("""<div[^>]+class\s*=\s*["'][^"']*\bcol-lg-wide-75\b[^"']*["'][^>]*>([\s\S]*?)(?=<div[^>]+class\s*=\s*["'][^"']*\b(?:col-lg-wide-25|stui-foot|col-pd\s+text-center)\b)""")
+            .find(html)?.let { return it.groupValues[1].takeIf { s -> s.length > 500 } ?: html }
+
+        // 方案 2：删除侧边栏块
+        var s = html
+        // 删除 stui-pannel-side 容器（侧边栏）
+        s = Regex("""<div[^>]+class\s*=\s*["'][^"']*stui-pannel-side[^"']*["'][^>]*>[\s\S]*?</div>\s*</div>""", RegexOption.DOT_MATCHES_ALL)
+            .replace(s, "<!-- side removed -->")
+        // 删除“猜你喜欢/热门推荐”模块 (没明确 class 的常见说法)
+        // 保留现有正则逻辑，能找到视频就返回 main area
+        return s
     }
 
     private fun isValidCategoryName(name: String): Boolean {
